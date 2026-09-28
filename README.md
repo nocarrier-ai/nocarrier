@@ -4,6 +4,4 @@
   <img alt="NoCarrier" src="docs/assets/nocarrier-lockup-light.svg" width="480">
 </picture>
 
-
-# NO CARRIER
-TBD
+Under construction
