@@ -10,19 +10,19 @@ import (
 )
 
 type dataReadRole struct {
-	deps role.RoleOptions
+	opts role.RoleOptions
 }
 
 func New(deps role.RoleOptions) (role.Role, error) {
-	return &dataReadRole{deps: deps}, nil
+	return &dataReadRole{opts: deps}, nil
 }
 
 func (q *dataReadRole) Name() string { return role.DataRead }
 
 func (q *dataReadRole) Run(ctx context.Context) error {
-	log := q.deps.Logger.With("role", role.DataRead)
+	log := q.opts.Logger.With("role", role.DataRead)
 
-	svc, err := micro.AddService(q.deps.NC, micro.Config{
+	svc, err := micro.AddService(q.opts.NC, micro.Config{
 		Name:        "nocarrier-read",
 		Version:     "0.1.0",
 		Description: "Serves decision log pages and other history queries",
