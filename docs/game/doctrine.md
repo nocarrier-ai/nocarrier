@@ -40,7 +40,6 @@ SyncTERM 1.2 - Connected to nocarrier.ai:23
 ██ NO CARRIER ██  universe: TRAVELER-ITERATION-12   tick 41,882
 
 ENTER DIAL CODE: 7719-0402-5518
-CODE ACCEPTED. 
 CONNECT 96000
 
 Welcome back, kevin. Last connect: tick 41,367 (8.6 hours ago)
