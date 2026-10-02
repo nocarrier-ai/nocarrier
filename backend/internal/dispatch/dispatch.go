@@ -12,20 +12,10 @@ import (
 	"github.com/nats-io/nats.go"
 	"github.com/nats-io/nats.go/jetstream"
 
+	"github.com/nocarrier-ai/nocarrier/internal/decide"
+	"github.com/nocarrier-ai/nocarrier/internal/sector"
 	"github.com/nocarrier-ai/nocarrier/internal/streams"
 )
-
-// ExecuteTick commands the sector aggregate to resolve tick Tick.
-type ExecuteTick struct {
-	Sector string `json:"sector"`
-	Tick   int64  `json:"tick"`
-}
-
-// DecideNow commands a decision pass for one avatar at tick Tick.
-type DecideNow struct {
-	Avatar string `json:"avatar"`
-	Tick   int64  `json:"tick"`
-}
 
 type Dispatcher struct {
 	js  jetstream.JetStream
@@ -57,13 +47,13 @@ func (d *Dispatcher) Dispatch(ctx context.Context, tick int64) error {
 		return fmt.Errorf("active sectors: %w", err)
 	}
 	var published int
-	for sector, lastResolved := range active {
+	for id, lastResolved := range active {
 		// Straggler recovery: publish every unresolved tick up to and
 		// including this one, in order. Normally that is just `tick`.
 		for t := lastResolved + 1; t <= tick; t++ {
-			if err := d.publish(ctx, streams.ExecuteSubject(sector),
-				streams.ExecuteMsgID(sector, t), ExecuteTick{Sector: sector, Tick: t}); err != nil {
-				return fmt.Errorf("dispatch execute %s@%d: %w", sector, t, err)
+			if err := d.publish(ctx, streams.ExecuteSubject(id),
+				streams.ExecuteMsgID(id, t), sector.ExecuteTick{Sector: id, Tick: t}); err != nil {
+				return fmt.Errorf("dispatch execute %s@%d: %w", id, t, err)
 			}
 			published++
 		}
@@ -75,7 +65,7 @@ func (d *Dispatcher) Dispatch(ctx context.Context, tick int64) error {
 	}
 	for _, avatar := range due {
 		if err := d.publish(ctx, streams.DecideSubject(avatar),
-			streams.DecideMsgID(avatar, tick), DecideNow{Avatar: avatar, Tick: tick}); err != nil {
+			streams.DecideMsgID(avatar, tick), decide.DecideNow{Avatar: avatar, Tick: tick}); err != nil {
 			return fmt.Errorf("dispatch decide %s@%d: %w", avatar, tick, err)
 		}
 	}

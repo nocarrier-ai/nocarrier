@@ -8,9 +8,15 @@ import (
 	"time"
 
 	"github.com/nats-io/nats.go/jetstream"
-	"github.com/nocarrier-ai/nocarrier/internal/dispatch"
+
 	"github.com/nocarrier-ai/nocarrier/internal/streams"
 )
+
+// DecideNow commands a decision pass for one avatar at tick Tick.
+type DecideNow struct {
+	Avatar string `json:"avatar"`
+	Tick   int64  `json:"tick"`
+}
 
 // PlanRevised carries an avatar's full new intent queue. The current plan is
 // the last PlanRevised plus completions recorded in TickResolved events.
@@ -71,7 +77,7 @@ func (p *Pool) Run(ctx context.Context) error {
 }
 
 func (p *Pool) handle(ctx context.Context, msg jetstream.Msg) {
-	var cmd dispatch.DecideNow
+	var cmd DecideNow
 	if err := json.Unmarshal(msg.Data(), &cmd); err != nil {
 		p.log.Error("bad decide command, terminating", "err", err)
 		_ = msg.Term()
@@ -88,7 +94,7 @@ func (p *Pool) handle(ctx context.Context, msg jetstream.Msg) {
 	}
 
 	rev := PlanRevised{Type: "PlanRevised", Avatar: cmd.Avatar, Tick: cmd.Tick, Intents: intents}
-	if err := p.append(ctx, streams.AvatarSubject(cmd.Avatar), rev); err != nil {
+	if err := p.append(ctx, streams.PlanSubject(cmd.Avatar), rev); err != nil {
 		log.Warn("append PlanRevised", "err", err)
 		_ = msg.NakWithDelay(2 * time.Second)
 		return

@@ -1,8 +1,4 @@
-// Package execute handles ExecuteTick commands for sector aggregates. All
-// instances share one durable pull consumer; the guarded append on
-// world.<sector> guarantees exactly one TickResolved per sector per tick no
-// matter how many handlers race.
-package execute
+package sector
 
 import (
 	"context"
@@ -15,19 +11,8 @@ import (
 	"github.com/nats-io/nats.go"
 	"github.com/nats-io/nats.go/jetstream"
 
-	"github.com/nocarrier-ai/nocarrier/internal/dispatch"
 	"github.com/nocarrier-ai/nocarrier/internal/streams"
 )
-
-// TickResolved is the one event a sector appends per resolved tick. Payload
-// carries the tick's outcomes; Resolver fills them in.
-type TickResolved struct {
-	Type    string          `json:"type"` // "TickResolved"
-	Sector  string          `json:"sector"`
-	Tick    int64           `json:"tick"`
-	Pending bool            `json:"pending"`
-	Events  json.RawMessage `json:"events"`
-}
 
 // Resolver is the pure game-rules function. Given the sector's replayed
 // state and the tick, it returns the outcome events. Deterministic: same
@@ -78,7 +63,7 @@ func (p *Pool) Run(ctx context.Context) error {
 }
 
 func (p *Pool) handle(ctx context.Context, msg jetstream.Msg) {
-	var cmd dispatch.ExecuteTick
+	var cmd ExecuteTick
 	if err := json.Unmarshal(msg.Data(), &cmd); err != nil {
 		p.log.Error("bad execute command, terminating", "err", err)
 		_ = msg.Term()
@@ -89,7 +74,7 @@ func (p *Pool) handle(ctx context.Context, msg jetstream.Msg) {
 	stop := keepAlive(ctx, msg, 10*time.Second)
 	defer stop()
 
-	subject := streams.WorldSubject(cmd.Sector)
+	subject := streams.SectorSubject(cmd.Sector)
 	lastTick, lastSeq, err := p.head(ctx, subject)
 	if err != nil {
 		log.Warn("read sector head", "err", err)
@@ -144,7 +129,7 @@ func (p *Pool) handle(ctx context.Context, msg jetstream.Msg) {
 // head returns the last resolved tick and stream sequence for a sector
 // subject. A sector with no events yet reports tick -1, sequence 0.
 func (p *Pool) head(ctx context.Context, subject string) (int64, uint64, error) {
-	s, err := p.js.Stream(ctx, streams.StreamWorld)
+	s, err := p.js.Stream(ctx, streams.StreamEvents)
 	if err != nil {
 		return 0, 0, err
 	}

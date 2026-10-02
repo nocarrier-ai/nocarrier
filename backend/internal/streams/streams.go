@@ -10,13 +10,16 @@ import (
 
 const (
 	StreamClock     = "CLOCK"
-	StreamWorld     = "WORLD"
-	StreamAvatar    = "AVATAR"
+	StreamEvents    = "EVENTS"
 	StreamDecisions = "DECISIONS"
 	StreamExecute   = "EXECUTE"
 	StreamDecide    = "DECIDE"
 
 	SubjectClock = "clock.universe"
+
+	SectorEvents = "sector.*"
+	AvatarEvents = "avatar.*"
+	PlanEvents   = "plan.*"
 
 	BucketSectorState  = "sector-state"
 	BucketActive       = "active-sectors"
@@ -25,8 +28,9 @@ const (
 	BucketLeaderboards = "leaderboards"
 )
 
-func WorldSubject(sector string) string     { return "world." + sector }
+func SectorSubject(sector string) string    { return "sector." + sector }
 func AvatarSubject(avatar string) string    { return "avatar." + avatar }
+func PlanSubject(avatar string) string      { return "plan." + avatar }
 func DecisionsSubject(avatar string) string { return "decisions." + avatar }
 func ExecuteSubject(sector string) string   { return "execute." + sector }
 func DecideSubject(avatar string) string    { return "decide." + avatar }
@@ -50,16 +54,8 @@ func Ensure(ctx context.Context, js jetstream.JetStream, replicas int, tickPerio
 			AllowDirect: true,
 		},
 		{
-			Name:        StreamWorld,
-			Subjects:    []string{"world.>"},
-			Storage:     jetstream.FileStorage,
-			Compression: jetstream.S2Compression,
-			Replicas:    replicas,
-			AllowDirect: true,
-		},
-		{
-			Name:        StreamAvatar,
-			Subjects:    []string{"avatar.>"},
+			Name:        StreamEvents,
+			Subjects:    []string{SectorEvents, AvatarEvents, PlanEvents},
 			Storage:     jetstream.FileStorage,
 			Compression: jetstream.S2Compression,
 			Replicas:    replicas,

@@ -23,7 +23,8 @@ Strict event sourcing terms apply throughout.
   of rebuilding state. A rejected command _never_ produces an event.
 - **Aggregate**: the consistency boundary. The **sector** is the main aggregate, the
   **universe clock** is a second, single-instance aggregate. Fleet admirals (avatars) have their
-  own streams for doctrine and plans.
+  own subjects for doctrine and plans. Each aggregate instance owns exactly one subject,
+  `<kind>.<id>`, and that subject is its consistency boundary.
 - **Projection**: a fold over event streams into a read model (KV bucket). Every read
   model must be rebuildable by replay from the streams.
 - **Intent**: The output of a decision model pipeline and an element of an avatar's plan. An action the avatar intends to
@@ -104,10 +105,10 @@ use work-queue retention, which is consumed on ack, never replayed, and not part
 All instances share one durable pull consumer on `EXECUTE`. A handler for
 `ExecuteTick{S, T}`:
 
-1. Reads the last event on `world.S` (tick L at stream sequence Q).
+1. Reads the last event on `sector.S` (tick L at stream sequence Q).
 2. _L >= T_: already resolved (duplicate or redelivery). Ack, done.
 3. _L < T-1_: predecessor not resolved yet; nak with delay and wait.
-4. _L == T-1_: load the sector-state read model, replay any `world.S` tail past
+4. _L == T-1_: load the sector-state read model, replay any `sector.S` tail past
    its recorded sequence, run the resolver (a pure deterministic function of
    state, intents, doctrine deliveries, seed(universe seed, S, T)), and
    append `TickResolved{S, T, pending, events}` with
@@ -143,7 +144,7 @@ is the cluster-wide cap on in-flight model calls. A handler for `DecideNow`:
    into qualitative features; other players' free text is guardrailed or reduced
    to categories.
 3. Expands the chosen plan into an intent queue and appends
-   `PlanRevised{avatar, tick, full intent queue}` to `avatar.<id>` and a decision
+   `PlanRevised{avatar, tick, full intent queue}` to `plan.<avatar>` and a decision
    record (perception digest, questions, answer distributions, resulting
    plan) to `decisions.<avatar>`.
 
@@ -159,10 +160,19 @@ keeps executing meanwhile.
 Event streams (file storage, S2 compression where large, AllowDirect):
 
 - `CLOCK`    clock.universe        UniverseCreated, TickAdvanced
-- `WORLD`    world.<sector>        one TickResolved per sector-tick
-- `AVATAR`   avatar.<id>           DoctrineUpdated, PlanRevised
+- `EVENTS`   sector.<id>           one TickResolved per sector-tick
+             avatar.<id>           avatar lifecycle; DoctrineUpdated until it
+                                 moves to doctrine.<avatar>
+             plan.<avatar>         PlanRevised
 - `DECISIONS` decisions.<avatar>   decision records; MaxMsgsPerSubject caps
                                  per-player history depth
+
+All aggregate events share `EVENTS`. The subject kind matches the Go package
+that owns the aggregate, and the id is a single token (the stream only binds
+`<kind>.*`, so a multi-token id has nowhere to land). Guarded appends use
+`Nats-Expected-Last-Subject-Sequence` against the aggregate's one subject.
+`CLOCK` stays separate because nothing projects from it; `DECISIONS` is a
+capped log, not aggregate events.
 
 Command streams (work-queue retention, duplicate window 3 tick periods):
 
@@ -179,28 +189,32 @@ KV buckets (all rebuildable by replay):
 
 ## Projections
 
-Each projection is a sequential durable consumer (`MaxAckPending` 1) folding
-one stream into KV. Every entry stores its value together with the last
-applied stream sequence per source stream. A redelivered or replayed event at
-or below the stored sequence is skipped. Sequences from different streams are
-never compared. Writes are revision-checked read-modify-write with retry.
-This is what keeps projections idempotent while events stay deltas.
+Each projection is one sequential durable consumer (`MaxAckPending` 1) on
+`EVENTS`, filtered to the aggregate kinds it folds, so it sees a single
+ordered sequence across aggregates. Every entry stores its value together with
+the last applied stream sequence. A redelivered or replayed event at or below
+the stored sequence is skipped. One consumer means one writer per entry, so a
+write is a single revision-checked update; a conflict naks and the redelivery
+re-reads. This is what keeps projections idempotent while events stay deltas.
 
-`active-sectors` (implemented) is the dispatcher's read model. Entry per
-sector: `{last_resolved, world_seq, avatar_seq}`.
+Projections switch on the event type and decode into the owning aggregate's
+event struct. Nothing reacts to an event by sending a command: cross-aggregate
+effects are projection updates that the tick dispatcher reads.
 
-The `WORLD` fold advances
-`last_resolved` and deletes the entry when TickResolved.pending is false. 
+`active-sectors` (implemented) is the dispatcher's read model. It folds
+`sector.*` and `avatar.*`. Entry per sector: `{last_resolved, seq}`.
 
-The
-`AVATAR` fold creates/keeps the entry on DoctrineUpdated (activation only). A
+TickResolved advances
+`last_resolved` and deletes the entry when pending is false. 
+
+DoctrineUpdated with a sector creates/keeps the entry (activation only). A
 sector not in the bucket costs nothing. Rules the real resolver must honor:
 pending is false only when the sector's next tick is provably a no-op
 (pending must stay true while intents remain, ships with standing orders are
 present, or doctrine is undelivered). 
 
 Known TODO: when movement is coded, the
-`WORLD` fold must also upsert the destination sector's entry for each
+projection must also upsert the destination sector's entry for each
 `ShipMoved` outcome, or ships arrive into dead sectors and stall. 
 
 Known edge to fix: activation creates entries at last_resolved -1, which triggers a
@@ -261,8 +275,8 @@ commands redeliver, projections resume from durable cursors.
 Monorepo github.com/nocarrier-ai/nocarrier:
 
 - `backend/` -  Go module (this design); cmd/nocarrierd + internal/{loop,
-             streams, clock, dispatch, execute, decide, project, service,
-             devnats}
+             streams, clock, dispatch, sector, decide, project, service,
+             devnats, natstest (test-only)}
 - `web/`       Phoenix app (LiveView + telnet), NATS via Gnat, per-node feed
              subscription manager rebroadcasting via local PubSub
 - `proto/`     `api/` (shared) and `events/` (Go-only)

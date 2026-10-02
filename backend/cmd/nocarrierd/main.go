@@ -28,9 +28,9 @@ import (
 	"github.com/nocarrier-ai/nocarrier/internal/decide"
 	"github.com/nocarrier-ai/nocarrier/internal/devnats"
 	"github.com/nocarrier-ai/nocarrier/internal/dispatch"
-	"github.com/nocarrier-ai/nocarrier/internal/execute"
 	"github.com/nocarrier-ai/nocarrier/internal/loop"
 	"github.com/nocarrier-ai/nocarrier/internal/project"
+	"github.com/nocarrier-ai/nocarrier/internal/sector"
 	"github.com/nocarrier-ai/nocarrier/internal/service"
 	"github.com/nocarrier-ai/nocarrier/internal/streams"
 )
@@ -102,7 +102,7 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	execPool := execute.NewPool(js, log, cfg.executeWorkers, toyResolver{})
+	execPool := sector.NewPool(js, log, cfg.executeWorkers, toyResolver{})
 	decidePool := decide.NewPool(js, log, cfg.decideWorkers, notImplementedModel{})
 	services := service.New(nc, log)
 
@@ -113,10 +113,7 @@ func run() error {
 		_ = health.Shutdown(sctx)
 	}()
 
-	loops := []loop.Loop{pacer, execPool, decidePool, services}
-	for _, l := range active.Loops(js, log) {
-		loops = append(loops, l)
-	}
+	loops := []loop.Loop{pacer, execPool, decidePool, services, project.NewLoop(js, log, active)}
 
 	// TODO: append project.NewLoop(js, log, <projection>) per projection
 	// once the concrete projections exist.

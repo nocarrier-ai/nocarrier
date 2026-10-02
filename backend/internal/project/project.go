@@ -10,13 +10,15 @@ import (
 	"log/slog"
 
 	"github.com/nats-io/nats.go/jetstream"
+
+	"github.com/nocarrier-ai/nocarrier/internal/streams"
 )
 
 // Projection folds events from one stream into read models. Apply must be
 // idempotent under redelivery by checking the stored sequence per entry.
 type Projection interface {
 	Name() string
-	Stream() string
+	FilterSubjects() []string
 	Apply(ctx context.Context, msg jetstream.Msg) error
 }
 
@@ -34,9 +36,10 @@ func NewLoop(js jetstream.JetStream, log *slog.Logger, p Projection) *Loop {
 func (l *Loop) Name() string { return "project-" + l.proj.Name() }
 
 func (l *Loop) Run(ctx context.Context) error {
-	cons, err := l.js.CreateOrUpdateConsumer(ctx, l.proj.Stream(), jetstream.ConsumerConfig{
-		Durable:   "proj-" + l.proj.Name(),
-		AckPolicy: jetstream.AckExplicitPolicy,
+	cons, err := l.js.CreateOrUpdateConsumer(ctx, streams.StreamEvents, jetstream.ConsumerConfig{
+		Durable:        "proj-" + l.proj.Name(),
+		FilterSubjects: l.proj.FilterSubjects(),
+		AckPolicy:      jetstream.AckExplicitPolicy,
 		// Sequential by design: one message in flight keeps stream order.
 		MaxAckPending: 1,
 	})
@@ -59,10 +62,3 @@ func (l *Loop) Run(ctx context.Context) error {
 	cc.Stop()
 	return nil
 }
-
-// TODO: concrete projections, each its own file:
-//   active-sectors   WORLD + AVATAR -> BucketActive (dispatcher input)
-//   due-avatars      DECISIONS + WORLD triggers -> BucketDue (dispatcher input)
-//   sector-state     WORLD -> BucketSectorState (execute snapshot input)
-//   avatar-status    WORLD + AVATAR -> BucketAvatarStatus (Phoenix)
-//   leaderboards     WORLD -> BucketLeaderboards (Phoenix)
