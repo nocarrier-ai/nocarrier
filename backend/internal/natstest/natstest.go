@@ -3,7 +3,6 @@ package natstest
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"io"
 	"log/slog"
 	"testing"
@@ -116,21 +115,11 @@ func Last(t *testing.T, js jetstream.JetStream, stream, subject string, v any) b
 	t.Helper()
 	ctx, cancel := timeout()
 	defer cancel()
-	s, err := js.Stream(ctx, stream)
-	if err != nil {
-		t.Fatalf("stream %s: %v", stream, err)
-	}
-	raw, err := s.GetLastMsgForSubject(ctx, subject)
-	if errors.Is(err, jetstream.ErrMsgNotFound) {
-		return false
-	}
+	seq, err := streams.Last(ctx, js, stream, subject, v)
 	if err != nil {
 		t.Fatalf("last %s: %v", subject, err)
 	}
-	if err := json.Unmarshal(raw.Data, v); err != nil {
-		t.Fatalf("decode %s: %v", subject, err)
-	}
-	return true
+	return seq != 0
 }
 
 func timeout() (context.Context, context.CancelFunc) {

@@ -8,7 +8,6 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/nats-io/nats.go"
 	"github.com/nats-io/nats.go/jetstream"
 
 	"github.com/nocarrier-ai/nocarrier/internal/streams"
@@ -18,7 +17,7 @@ import (
 // state and the tick, it returns the outcome events. Deterministic: same
 // inputs, same bytes.
 type Resolver interface {
-	Resolve(ctx context.Context, sector string, tick int64) (events json.RawMessage, pending bool, err error)
+	Resolve(ctx context.Context, sectorID string, tick int64) (events json.RawMessage, pending bool, err error)
 }
 
 type Pool struct {
@@ -69,12 +68,12 @@ func (p *Pool) handle(ctx context.Context, msg jetstream.Msg) {
 		_ = msg.Term()
 		return
 	}
-	log := p.log.With("sector", cmd.Sector, "tick", cmd.Tick)
+	log := p.log.With("sector_id", cmd.SectorID, "tick", cmd.Tick)
 
 	stop := keepAlive(ctx, msg, 10*time.Second)
 	defer stop()
 
-	subject := streams.SectorSubject(cmd.Sector)
+	subject := streams.SectorSubject(cmd.SectorID)
 	lastTick, lastSeq, err := p.head(ctx, subject)
 	if err != nil {
 		log.Warn("read sector head", "err", err)
@@ -95,26 +94,16 @@ func (p *Pool) handle(ctx context.Context, msg jetstream.Msg) {
 		return
 	}
 
-	outcomes, pending, err := p.resolve.Resolve(ctx, cmd.Sector, cmd.Tick)
+	outcomes, pending, err := p.resolve.Resolve(ctx, cmd.SectorID, cmd.Tick)
 	if err != nil {
 		log.Error("resolve", "err", err)
 		_ = msg.NakWithDelay(2 * time.Second)
 		return
 	}
 
-	ev := TickResolved{Type: "TickResolved", Sector: cmd.Sector, Tick: cmd.Tick, Events: outcomes, Pending: pending}
-	data, err := json.Marshal(ev)
-	if err != nil {
-		log.Error("marshal", "err", err)
-		_ = msg.Term()
-		return
-	}
-	out := nats.NewMsg(subject)
-	out.Data = data
-	out.Header.Set("Nats-Expected-Last-Subject-Sequence", fmt.Sprintf("%d", lastSeq))
-
-	if _, err := p.js.PublishMsg(ctx, out); err != nil {
-		if isWrongLastSequence(err) {
+	ev := TickResolved{Type: "TickResolved", SectorID: cmd.SectorID, Tick: cmd.Tick, Events: outcomes, Pending: pending}
+	if _, err := streams.Append(ctx, p.js, subject, ev, lastSeq); err != nil {
+		if errors.Is(err, streams.ErrConflict) {
 			// Another handler appended first; the tick is resolved.
 			_ = msg.Ack()
 			return
@@ -129,22 +118,15 @@ func (p *Pool) handle(ctx context.Context, msg jetstream.Msg) {
 // head returns the last resolved tick and stream sequence for a sector
 // subject. A sector with no events yet reports tick -1, sequence 0.
 func (p *Pool) head(ctx context.Context, subject string) (int64, uint64, error) {
-	s, err := p.js.Stream(ctx, streams.StreamEvents)
-	if err != nil {
-		return 0, 0, err
-	}
-	raw, err := s.GetLastMsgForSubject(ctx, subject)
-	if err != nil {
-		if errors.Is(err, jetstream.ErrMsgNotFound) {
-			return -1, 0, nil
-		}
-		return 0, 0, err
-	}
 	var ev TickResolved
-	if err := json.Unmarshal(raw.Data, &ev); err != nil {
+	seq, err := streams.Last(ctx, p.js, streams.StreamEvents, subject, &ev)
+	if err != nil {
 		return 0, 0, err
 	}
-	return ev.Tick, raw.Sequence, nil
+	if seq == 0 {
+		return -1, 0, nil
+	}
+	return ev.Tick, seq, nil
 }
 
 // keepAlive extends the ack deadline while a handler works, so a live
@@ -166,9 +148,4 @@ func keepAlive(ctx context.Context, msg jetstream.Msg, every time.Duration) (sto
 		}
 	}()
 	return func() { close(done) }
-}
-
-func isWrongLastSequence(err error) bool {
-	var apiErr *jetstream.APIError
-	return errors.As(err, &apiErr) && apiErr.ErrorCode == jetstream.JSErrCodeStreamWrongLastSequence
 }

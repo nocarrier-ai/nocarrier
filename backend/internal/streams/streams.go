@@ -28,18 +28,18 @@ const (
 	BucketLeaderboards = "leaderboards"
 )
 
-func SectorSubject(sector string) string    { return "sector." + sector }
-func AvatarSubject(avatar string) string    { return "avatar." + avatar }
-func PlanSubject(avatar string) string      { return "plan." + avatar }
-func DecisionsSubject(avatar string) string { return "decisions." + avatar }
-func ExecuteSubject(sector string) string   { return "execute." + sector }
-func DecideSubject(avatar string) string    { return "decide." + avatar }
+func SectorSubject(sectorID string) string    { return "sector." + sectorID }
+func AvatarSubject(avatarID string) string    { return "avatar." + avatarID }
+func PlanSubject(avatarID string) string      { return "plan." + avatarID }
+func DecisionsSubject(avatarID string) string { return "decisions." + avatarID }
+func ExecuteSubject(sectorID string) string   { return "execute." + sectorID }
+func DecideSubject(avatarID string) string    { return "decide." + avatarID }
 
 // ExecuteMsgID and DecideMsgID are the Nats-Msg-Id values that deduplicate
 // dispatch. The duplicate window on those streams must exceed two tick
 // periods for these to hold across a re-dispatch.
-func ExecuteMsgID(sector string, tick int64) string { return fmt.Sprintf("%s@%d", sector, tick) }
-func DecideMsgID(avatar string, tick int64) string  { return fmt.Sprintf("%s@%d", avatar, tick) }
+func ExecuteMsgID(sectorID string, tick int64) string { return fmt.Sprintf("%s@%d", sectorID, tick) }
+func DecideMsgID(avatarID string, tick int64) string  { return fmt.Sprintf("%s@%d", avatarID, tick) }
 
 // Ensure creates or updates all streams and buckets. Safe to run from every
 // instance concurrently.

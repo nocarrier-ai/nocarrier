@@ -22,7 +22,7 @@ type ActiveEntry struct {
 }
 
 type doctrineUpdated struct {
-	Sector string `json:"sector"`
+	SectorID string `json:"sector_id"`
 }
 
 type ActiveSectors struct {
@@ -51,8 +51,8 @@ func (a *ActiveSectors) ActiveSectors(ctx context.Context) (map[string]int64, er
 	if err != nil {
 		return nil, err
 	}
-	for key := range lister.Keys() {
-		entry, err := a.kv.Get(ctx, key)
+	for sectorID := range lister.Keys() {
+		entry, err := a.kv.Get(ctx, sectorID)
 		if err != nil {
 			if errors.Is(err, jetstream.ErrKeyNotFound) {
 				continue // deleted between list and get
@@ -61,9 +61,9 @@ func (a *ActiveSectors) ActiveSectors(ctx context.Context) (map[string]int64, er
 		}
 		var e ActiveEntry
 		if err := json.Unmarshal(entry.Value(), &e); err != nil {
-			return nil, fmt.Errorf("entry %s: %w", key, err)
+			return nil, fmt.Errorf("entry %s: %w", sectorID, err)
 		}
-		out[key] = e.LastResolved
+		out[sectorID] = e.LastResolved
 	}
 	return out, nil
 }
@@ -74,7 +74,7 @@ func (a *ActiveSectors) DueAvatars(context.Context, int64) ([]string, error) {
 }
 
 func (a *ActiveSectors) Apply(ctx context.Context, msg jetstream.Msg) error {
-	key, f := route(msg.Data())
+	sectorID, f := route(msg.Data())
 	if f == nil {
 		return nil
 	}
@@ -87,11 +87,11 @@ func (a *ActiveSectors) Apply(ctx context.Context, msg jetstream.Msg) error {
 		e   = ActiveEntry{LastResolved: -1}
 		rev uint64
 	)
-	entry, err := a.kv.Get(ctx, key)
+	entry, err := a.kv.Get(ctx, sectorID)
 	switch {
 	case err == nil:
 		if err := json.Unmarshal(entry.Value(), &e); err != nil {
-			return fmt.Errorf("entry %s: %w", key, err)
+			return fmt.Errorf("entry %s: %w", sectorID, err)
 		}
 		rev = entry.Revision()
 	case !errors.Is(err, jetstream.ErrKeyNotFound):
@@ -106,13 +106,13 @@ func (a *ActiveSectors) Apply(ctx context.Context, msg jetstream.Msg) error {
 			return err
 		}
 		if rev == 0 {
-			_, err = a.kv.Create(ctx, key, data)
+			_, err = a.kv.Create(ctx, sectorID, data)
 		} else {
-			_, err = a.kv.Update(ctx, key, data, rev)
+			_, err = a.kv.Update(ctx, sectorID, data, rev)
 		}
 		return err
 	case opDelete:
-		return a.kv.Delete(ctx, key, jetstream.LastRevision(rev))
+		return a.kv.Delete(ctx, sectorID, jetstream.LastRevision(rev))
 	}
 	return nil
 }
@@ -137,19 +137,19 @@ func route(data []byte) (string, fold) {
 	switch head.Type {
 	case "TickResolved":
 		var ev sector.TickResolved
-		if json.Unmarshal(data, &ev) != nil || ev.Sector == "" {
+		if json.Unmarshal(data, &ev) != nil || ev.SectorID == "" {
 			return "", nil
 		}
-		return ev.Sector, func(e *ActiveEntry) bool {
+		return ev.SectorID, func(e *ActiveEntry) bool {
 			e.LastResolved = max(e.LastResolved, ev.Tick)
 			return ev.Pending
 		}
 	case "DoctrineUpdated":
 		var ev doctrineUpdated
-		if json.Unmarshal(data, &ev) != nil || ev.Sector == "" {
+		if json.Unmarshal(data, &ev) != nil || ev.SectorID == "" {
 			return "", nil
 		}
-		return ev.Sector, func(*ActiveEntry) bool { return true }
+		return ev.SectorID, func(*ActiveEntry) bool { return true }
 	}
 	return "", nil
 }

@@ -48,11 +48,11 @@ func TestDispatchPublishesUnresolvedRangeAndDueAvatars(t *testing.T) {
 	}
 
 	var exec sector.ExecuteTick
-	if !natstest.Last(t, js, streams.StreamExecute, "execute.s1", &exec) || exec != (sector.ExecuteTick{Sector: "s1", Tick: 5}) {
+	if !natstest.Last(t, js, streams.StreamExecute, "execute.s1", &exec) || exec != (sector.ExecuteTick{SectorID: "s1", Tick: 5}) {
 		t.Errorf("last execute.s1 = %+v", exec)
 	}
 	var dec decide.DecideNow
-	if !natstest.Last(t, js, streams.StreamDecide, "decide.a1", &dec) || dec != (decide.DecideNow{Avatar: "a1", Tick: 5}) {
+	if !natstest.Last(t, js, streams.StreamDecide, "decide.a1", &dec) || dec != (decide.DecideNow{AvatarID: "a1", Tick: 5}) {
 		t.Errorf("last decide.a1 = %+v", dec)
 	}
 }

@@ -124,46 +124,31 @@ func run() error {
 // the CLOCK stream is empty. The guarded first append means concurrent
 // instances race safely: one wins, the rest read the winner's event.
 func ensureUniverse(ctx context.Context, js jetstream.JetStream, cfg config, log *slog.Logger) (clock.UniverseCreated, error) {
-	var u clock.UniverseCreated
 	if err := streams.Ensure(ctx, js, cfg.replicas, cfg.tickPeriod); err != nil {
-		return u, fmt.Errorf("ensure streams: %w", err)
+		return clock.UniverseCreated{}, fmt.Errorf("ensure streams: %w", err)
+	}
+	u := clock.UniverseCreated{Type: "UniverseCreated", TickPeriod: cfg.tickPeriod, Seed: time.Now().UnixNano()}
+	_, err := streams.Append(ctx, js, streams.SubjectClock, u, 0)
+	switch {
+	case err == nil:
+		log.Info("universe created")
+		return u, nil
+	case !errors.Is(err, streams.ErrConflict):
+		return clock.UniverseCreated{}, fmt.Errorf("create universe: %w", err)
 	}
 	s, err := js.Stream(ctx, streams.StreamClock)
 	if err != nil {
-		return u, err
+		return clock.UniverseCreated{}, err
 	}
-	raw, err := s.GetLastMsgForSubject(ctx, streams.SubjectClock)
-	switch {
-	case err == nil:
-		// Universe exists. UniverseCreated is always the first message.
-		first, ferr := s.GetMsg(ctx, 1)
-		if ferr != nil {
-			return u, fmt.Errorf("read UniverseCreated: %w", ferr)
-		}
-		if jerr := json.Unmarshal(first.Data, &u); jerr != nil || u.Type != "UniverseCreated" {
-			return u, fmt.Errorf("first clock event is not UniverseCreated")
-		}
-		_ = raw
-		return u, nil
-	case errors.Is(err, jetstream.ErrMsgNotFound):
-		u = clock.UniverseCreated{Type: "UniverseCreated", TickPeriod: cfg.tickPeriod, Seed: time.Now().UnixNano()}
-		data, merr := json.Marshal(u)
-		if merr != nil {
-			return u, merr
-		}
-		msg := nats.NewMsg(streams.SubjectClock)
-		msg.Data = data
-		msg.Header.Set("Nats-Expected-Last-Subject-Sequence", "0")
-		if _, perr := js.PublishMsg(ctx, msg); perr != nil {
-			// Lost the race: another instance created it. Re-read.
-			log.Info("universe already created by another instance")
-			return ensureUniverse(ctx, js, cfg, log)
-		}
-		log.Info("universe created")
-		return u, nil
-	default:
-		return u, err
+	first, err := s.GetMsg(ctx, 1)
+	if err != nil {
+		return clock.UniverseCreated{}, fmt.Errorf("read UniverseCreated: %w", err)
 	}
+	var existing clock.UniverseCreated
+	if err := json.Unmarshal(first.Data, &existing); err != nil || existing.Type != "UniverseCreated" {
+		return clock.UniverseCreated{}, errors.New("first clock event is not UniverseCreated")
+	}
+	return existing, nil
 }
 
 func startHealth(addr string, nc *nats.Conn, log *slog.Logger) *http.Server {
@@ -307,14 +292,14 @@ func envDuration(key string, def time.Duration) (time.Duration, error) {
 
 type toyResolver struct{}
 
-func (toyResolver) Resolve(_ context.Context, sector string, tick int64) (json.RawMessage, bool, error) {
+func (toyResolver) Resolve(_ context.Context, sectorID string, tick int64) (json.RawMessage, bool, error) {
 	h := fnv.New32a()
-	_, _ = h.Write([]byte(sector))
+	_, _ = h.Write([]byte(sectorID))
 	lifetime := int64(3 + h.Sum32()%8) // sector stays active 3-10 ticks
 	out, err := json.Marshal([]map[string]any{{
-		"type":   "ToyCounterIncremented",
-		"sector": sector,
-		"tick":   tick,
+		"type":      "ToyCounterIncremented",
+		"sector_id": sectorID,
+		"tick":      tick,
 	}})
 	if err != nil {
 		return nil, false, err

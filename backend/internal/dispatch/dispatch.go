@@ -47,13 +47,13 @@ func (d *Dispatcher) Dispatch(ctx context.Context, tick int64) error {
 		return fmt.Errorf("active sectors: %w", err)
 	}
 	var published int
-	for id, lastResolved := range active {
+	for sectorID, lastResolved := range active {
 		// Straggler recovery: publish every unresolved tick up to and
 		// including this one, in order. Normally that is just `tick`.
 		for t := lastResolved + 1; t <= tick; t++ {
-			if err := d.publish(ctx, streams.ExecuteSubject(id),
-				streams.ExecuteMsgID(id, t), sector.ExecuteTick{Sector: id, Tick: t}); err != nil {
-				return fmt.Errorf("dispatch execute %s@%d: %w", id, t, err)
+			if err := d.publish(ctx, streams.ExecuteSubject(sectorID),
+				streams.ExecuteMsgID(sectorID, t), sector.ExecuteTick{SectorID: sectorID, Tick: t}); err != nil {
+				return fmt.Errorf("dispatch execute %s@%d: %w", sectorID, t, err)
 			}
 			published++
 		}
@@ -63,10 +63,10 @@ func (d *Dispatcher) Dispatch(ctx context.Context, tick int64) error {
 	if err != nil {
 		return fmt.Errorf("due avatars: %w", err)
 	}
-	for _, avatar := range due {
-		if err := d.publish(ctx, streams.DecideSubject(avatar),
-			streams.DecideMsgID(avatar, tick), decide.DecideNow{Avatar: avatar, Tick: tick}); err != nil {
-			return fmt.Errorf("dispatch decide %s@%d: %w", avatar, tick, err)
+	for _, avatarID := range due {
+		if err := d.publish(ctx, streams.DecideSubject(avatarID),
+			streams.DecideMsgID(avatarID, tick), decide.DecideNow{AvatarID: avatarID, Tick: tick}); err != nil {
+			return fmt.Errorf("dispatch decide %s@%d: %w", avatarID, tick, err)
 		}
 	}
 	d.log.Info("dispatched", "tick", tick, "execute", published, "decide", len(due))

@@ -89,12 +89,12 @@ The winner reads two read models and fans out commands (at-least-once,
 deduplicated by deterministic `Nats-Msg-Id`, duplicate window >= 3 tick
 periods):
 
-- For each entry in _active-sectors_: publish `ExecuteTick{sector, tick}` to
-  `execute.<sector>` for every tick from last_resolved+1 through the current
-  tick (`Msg-Id "<sector>@<tick>"`). Normally that's one command. After a
+- For each entry in _active-sectors_: publish `ExecuteTick{sector_id, tick}` to
+  `execute.<sector_id>` for every tick from last_resolved+1 through the current
+  tick (`Msg-Id "<sector_id>@<tick>"`). Normally that's one command. After a
   stall or crash it's the catch-up range resolved strictly in order.
-- For each avatar in the "due" avatars list for this tick: publish `DecideNow{avatar,
-  tick}` to `decide.<avatar>` (`Msg-Id "<avatar>@<tick>"`).
+- For each avatar in the "due" avatars list for this tick: publish `DecideNow{avatar_id,
+  tick}` to `decide.<avatar_id>` (`Msg-Id "<avatar_id>@<tick>"`).
 
 A winner that crashes mid-fanout is repaired by the next tick's winner, whose
 read models still show the unresolved work. Command streams (`EXECUTE`, `DECIDE`)
@@ -144,9 +144,9 @@ is the cluster-wide cap on in-flight model calls. A handler for `DecideNow`:
    into qualitative features; other players' free text is guardrailed or reduced
    to categories.
 3. Expands the chosen plan into an intent queue and appends
-   `PlanRevised{avatar, tick, full intent queue}` to `plan.<avatar>` and a decision
+   `PlanRevised{avatar_id, tick, full intent queue}` to `plan.<avatar_id>` and a decision
    record (perception digest, questions, answer distributions, resulting
-   plan) to `decisions.<avatar>`.
+   plan) to `decisions.<avatar_id>`.
 
 Model access goes through a small interface (typed questions in, typed
 answers out). Initial target is Jev's hosted API but the API is an interface so the provider can be swapped.
@@ -159,13 +159,13 @@ keeps executing meanwhile.
 
 Event streams (file storage, S2 compression where large, AllowDirect):
 
-- `CLOCK`    clock.universe        UniverseCreated, TickAdvanced
-- `EVENTS`   sector.<id>           one TickResolved per sector-tick
-             avatar.<id>           avatar lifecycle; DoctrineUpdated until it
-                                 moves to doctrine.<avatar>
-             plan.<avatar>         PlanRevised
-- `DECISIONS` decisions.<avatar>   decision records; MaxMsgsPerSubject caps
-                                 per-player history depth
+- `CLOCK`     clock.universe          UniverseCreated, TickAdvanced
+- `EVENTS`    sector.<sector_id>      one TickResolved per sector-tick
+              avatar.<avatar_id>      avatar lifecycle; DoctrineUpdated until it
+                                      moves to doctrine.<avatar_id>
+              plan.<avatar_id>        PlanRevised
+- `DECISIONS` decisions.<avatar_id>   decision records; MaxMsgsPerSubject caps
+                                      per-player history depth
 
 All aggregate events share `EVENTS`. The subject kind matches the Go package
 that owns the aggregate, and the id is a single token (the stream only binds
@@ -176,8 +176,8 @@ capped log, not aggregate events.
 
 Command streams (work-queue retention, duplicate window 3 tick periods):
 
-- `EXECUTE`  execute.<sector>      ExecuteTick
-- `DECIDE`   decide.<avatar>       DecideNow
+- `EXECUTE`   execute.<sector_id>     ExecuteTick
+- `DECIDE`    decide.<avatar_id>      DecideNow
 
 KV buckets (all rebuildable by replay):
 
@@ -232,7 +232,7 @@ enforce this. The contract is:
   revision. The reply means accepted, not delivered; delivery is game state.
 - **Current state**: read KV buckets directly; KV watches drive live updates.
 - **History**: request/reply to the query micro service, e.g.
-  query.decisions.page reads decisions.<avatar> by time window with an
+  query.decisions.page reads decisions.<avatar_id> by time window with an
   ordered consumer, upcasts old events, replies with API read models.
 - **Live feeds**: per-avatar display-shaped messages (projector-produced).
 

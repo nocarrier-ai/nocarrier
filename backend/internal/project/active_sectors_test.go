@@ -12,24 +12,24 @@ import (
 
 func TestRoute(t *testing.T) {
 	cases := []struct {
-		name     string
-		data     string
-		wantKey  string
-		wantKeep bool
-		wantLast int64
+		name         string
+		data         string
+		wantSectorID string
+		wantKeep     bool
+		wantLast     int64
 	}{
-		{"pending tick", `{"type":"TickResolved","sector":"s1","tick":4,"pending":true}`, "s1", true, 4},
-		{"idle tick", `{"type":"TickResolved","sector":"s1","tick":4,"pending":false}`, "s1", false, 4},
-		{"doctrine with sector", `{"type":"DoctrineUpdated","avatar":"a1","sector":"s9"}`, "s9", true, -1},
+		{"pending tick", `{"type":"TickResolved","sector_id":"s1","tick":4,"pending":true}`, "s1", true, 4},
+		{"idle tick", `{"type":"TickResolved","sector_id":"s1","tick":4,"pending":false}`, "s1", false, 4},
+		{"doctrine with sector", `{"type":"DoctrineUpdated","avatar_id":"a1","sector_id":"s9"}`, "s9", true, -1},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			key, f := route([]byte(c.data))
+			sectorID, f := route([]byte(c.data))
 			if f == nil {
 				t.Fatal("not routed")
 			}
-			if key != c.wantKey {
-				t.Errorf("key %q, want %q", key, c.wantKey)
+			if sectorID != c.wantSectorID {
+				t.Errorf("sector ID %q, want %q", sectorID, c.wantSectorID)
 			}
 			e := ActiveEntry{LastResolved: -1}
 			if keep := f(&e); keep != c.wantKeep {
@@ -44,9 +44,9 @@ func TestRoute(t *testing.T) {
 
 func TestRouteSkips(t *testing.T) {
 	for name, data := range map[string]string{
-		"doctrine without sector": `{"type":"DoctrineUpdated","avatar":"a1"}`,
+		"doctrine without sector": `{"type":"DoctrineUpdated","avatar_id":"a1"}`,
 		"tick without sector":     `{"type":"TickResolved","tick":4,"pending":true}`,
-		"plan revised":            `{"type":"PlanRevised","avatar":"a1"}`,
+		"plan revised":            `{"type":"PlanRevised","avatar_id":"a1"}`,
 		"unknown type":            `{"type":"Nope"}`,
 		"bad json":                `{`,
 	} {
@@ -111,20 +111,20 @@ func TestActiveSectorsProjection(t *testing.T) {
 		})
 	}
 
-	natstest.Publish(t, js, streams.SectorSubject("s1"), sector.TickResolved{Type: "TickResolved", Sector: "s1", Tick: 0, Pending: true})
+	natstest.Publish(t, js, streams.SectorSubject("s1"), sector.TickResolved{Type: "TickResolved", SectorID: "s1", Tick: 0, Pending: true})
 	waitFor(map[string]int64{"s1": 0})
 
-	natstest.Publish(t, js, streams.AvatarSubject("a1"), map[string]string{"type": "DoctrineUpdated", "avatar": "a1", "sector": "s9"})
+	natstest.Publish(t, js, streams.AvatarSubject("a1"), map[string]string{"type": "DoctrineUpdated", "avatar_id": "a1", "sector_id": "s9"})
 	waitFor(map[string]int64{"s1": 0, "s9": -1})
 
-	natstest.Publish(t, js, streams.PlanSubject("a1"), map[string]string{"type": "PlanRevised", "avatar": "a1"})
-	natstest.Publish(t, js, streams.SectorSubject("s1"), sector.TickResolved{Type: "TickResolved", Sector: "s1", Tick: 1, Pending: true})
+	natstest.Publish(t, js, streams.PlanSubject("a1"), map[string]string{"type": "PlanRevised", "avatar_id": "a1"})
+	natstest.Publish(t, js, streams.SectorSubject("s1"), sector.TickResolved{Type: "TickResolved", SectorID: "s1", Tick: 1, Pending: true})
 	waitFor(map[string]int64{"s1": 1, "s9": -1})
 
-	natstest.Publish(t, js, streams.SectorSubject("s1"), sector.TickResolved{Type: "TickResolved", Sector: "s1", Tick: 2, Pending: false})
+	natstest.Publish(t, js, streams.SectorSubject("s1"), sector.TickResolved{Type: "TickResolved", SectorID: "s1", Tick: 2, Pending: false})
 	waitFor(map[string]int64{"s9": -1})
 
-	natstest.Publish(t, js, streams.SectorSubject("s1"), sector.TickResolved{Type: "TickResolved", Sector: "s1", Tick: 3, Pending: true})
+	natstest.Publish(t, js, streams.SectorSubject("s1"), sector.TickResolved{Type: "TickResolved", SectorID: "s1", Tick: 3, Pending: true})
 	waitFor(map[string]int64{"s1": 3, "s9": -1})
 
 	cons, err := js.Consumer(ctx, streams.StreamEvents, "proj-active-sectors")

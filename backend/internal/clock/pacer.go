@@ -9,7 +9,6 @@ import (
 	"math/rand/v2"
 	"time"
 
-	"github.com/nats-io/nats.go"
 	"github.com/nats-io/nats.go/jetstream"
 	"github.com/nocarrier-ai/nocarrier/internal/streams"
 )
@@ -28,7 +27,10 @@ type TickAdvanced struct {
 
 const MinTickPeriod = 30 * time.Second
 
-const graceInterval = 2 * time.Second
+const (
+	graceInterval = 2 * time.Second
+	maxJitter     = 500 * time.Millisecond
+)
 
 type Dispatcher interface {
 	Dispatch(ctx context.Context, tick int64) error
@@ -140,28 +142,22 @@ func (p *Pacer) armDuration() time.Duration {
 }
 
 func (p *Pacer) jitter() time.Duration {
-	return time.Duration(rand.Int64N(int64(500 * time.Millisecond)))
+	return time.Duration(rand.Int64N(int64(maxJitter)))
 }
 
 // attempt tries to advance to lastTick+1 with the expected-sequence guard,
 // and dispatches if this instance won.
 func (p *Pacer) attempt(ctx context.Context) error {
 	next := p.lastTick + 1
-	payload, err := json.Marshal(TickAdvanced{Type: "TickAdvanced", Tick: next, WinnerInstanceID: p.instanceID})
-	if err != nil {
-		return err
-	}
-	msg := nats.NewMsg(streams.SubjectClock)
-	msg.Data = payload
-	msg.Header.Set("Nats-Expected-Last-Subject-Sequence", fmt.Sprintf("%d", p.lastSeq))
+	ev := TickAdvanced{Type: "TickAdvanced", Tick: next, WinnerInstanceID: p.instanceID}
 
-	ack, err := p.js.PublishMsg(ctx, msg)
+	seq, err := streams.Append(ctx, p.js, streams.SubjectClock, ev, p.lastSeq)
 	switch {
 	case err == nil:
-		p.observe(observed{next, ack.Sequence, p.instanceID})
+		p.observe(observed{next, seq, p.instanceID})
 		p.log.Info("tick advanced", "tick", next)
 		return p.dispatch.Dispatch(ctx, next)
-	case isWrongLastSequence(err):
+	case errors.Is(err, streams.ErrConflict):
 		// Someone else advanced first; their event is coming on
 		// the consumer, but sync state now so the re-armed timer
 		// is compued from the new tick
@@ -189,26 +185,17 @@ func (p *Pacer) attempt(ctx context.Context) error {
 }
 
 func (p *Pacer) readHead(ctx context.Context) (observed, error) {
-	s, err := p.js.Stream(ctx, streams.StreamClock)
-	if err != nil {
-		return observed{}, err
-	}
-	raw, err := s.GetLastMsgForSubject(ctx, streams.SubjectClock)
-	if err != nil {
-		return observed{}, err
-	}
 	var ev TickAdvanced
-	if err := json.Unmarshal(raw.Data, &ev); err != nil {
+	seq, err := streams.Last(ctx, p.js, streams.StreamClock, streams.SubjectClock, &ev)
+	if err != nil {
 		return observed{}, err
+	}
+	if seq == 0 {
+		return observed{}, errors.New("clock has no events")
 	}
 	if ev.Type != "TickAdvanced" {
 		// Head is UniverseCreated: tick 0 hasn't happened yet.
-		return observed{tick: -1, seq: raw.Sequence}, nil
+		return observed{tick: -1, seq: seq}, nil
 	}
-	return observed{ev.Tick, raw.Sequence, ev.WinnerInstanceID}, nil
-}
-
-func isWrongLastSequence(err error) bool {
-	var apiErr *jetstream.APIError
-	return errors.As(err, &apiErr) && apiErr.ErrorCode == jetstream.JSErrCodeStreamWrongLastSequence
+	return observed{ev.Tick, seq, ev.WinnerInstanceID}, nil
 }

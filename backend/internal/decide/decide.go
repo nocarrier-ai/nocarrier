@@ -14,23 +14,23 @@ import (
 
 // DecideNow commands a decision pass for one avatar at tick Tick.
 type DecideNow struct {
-	Avatar string `json:"avatar"`
-	Tick   int64  `json:"tick"`
+	AvatarID string `json:"avatar_id"`
+	Tick     int64  `json:"tick"`
 }
 
 // PlanRevised carries an avatar's full new intent queue. The current plan is
 // the last PlanRevised plus completions recorded in TickResolved events.
 type PlanRevised struct {
-	Type    string          `json:"type"` // "PlanRevised"
-	Avatar  string          `json:"avatar"`
-	Tick    int64           `json:"tick"`
-	Intents json.RawMessage `json:"intents"`
+	Type     string          `json:"type"` // "PlanRevised"
+	AvatarID string          `json:"avatar_id"`
+	Tick     int64           `json:"tick"`
+	Intents  json.RawMessage `json:"intents"`
 }
 
 // Model is the decision-model seam: Noul/Choice/Score questions in, typed
 // answers out. Implemented against Jev; swappable for a self-hosted server.
 type Model interface {
-	Decide(ctx context.Context, avatar string, tick int64) (intents, record json.RawMessage, err error)
+	Decide(ctx context.Context, avatarID string, tick int64) (intents, record json.RawMessage, err error)
 }
 
 type Pool struct {
@@ -83,9 +83,9 @@ func (p *Pool) handle(ctx context.Context, msg jetstream.Msg) {
 		_ = msg.Term()
 		return
 	}
-	log := p.log.With("avatar", cmd.Avatar, "tick", cmd.Tick)
+	log := p.log.With("avatar_id", cmd.AvatarID, "tick", cmd.Tick)
 
-	intents, record, err := p.model.Decide(ctx, cmd.Avatar, cmd.Tick)
+	intents, record, err := p.model.Decide(ctx, cmd.AvatarID, cmd.Tick)
 	if err != nil {
 		log.Warn("model", "err", err)
 		// The plan keeps executing without a revision; retry via redelivery.
@@ -93,13 +93,13 @@ func (p *Pool) handle(ctx context.Context, msg jetstream.Msg) {
 		return
 	}
 
-	rev := PlanRevised{Type: "PlanRevised", Avatar: cmd.Avatar, Tick: cmd.Tick, Intents: intents}
-	if err := p.append(ctx, streams.PlanSubject(cmd.Avatar), rev); err != nil {
+	rev := PlanRevised{Type: "PlanRevised", AvatarID: cmd.AvatarID, Tick: cmd.Tick, Intents: intents}
+	if err := p.append(ctx, streams.PlanSubject(cmd.AvatarID), rev); err != nil {
 		log.Warn("append PlanRevised", "err", err)
 		_ = msg.NakWithDelay(2 * time.Second)
 		return
 	}
-	if err := p.append(ctx, streams.DecisionsSubject(cmd.Avatar), json.RawMessage(record)); err != nil {
+	if err := p.append(ctx, streams.DecisionsSubject(cmd.AvatarID), json.RawMessage(record)); err != nil {
 		// The plan revision landed; the log record is best-effort enough to
 		// retry inline rather than redeliver and double-revise.
 		log.Warn("append decision record", "err", err)

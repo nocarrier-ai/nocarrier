@@ -27,16 +27,16 @@ func startPool(t *testing.T) jetstream.JetStream {
 	return js
 }
 
-func execute(t *testing.T, js jetstream.JetStream, id string, tick int64) {
+func execute(t *testing.T, js jetstream.JetStream, sectorID string, tick int64) {
 	t.Helper()
-	natstest.Publish(t, js, streams.ExecuteSubject(id), sector.ExecuteTick{Sector: id, Tick: tick})
+	natstest.Publish(t, js, streams.ExecuteSubject(sectorID), sector.ExecuteTick{SectorID: sectorID, Tick: tick})
 }
 
-func resolvedTicks(t *testing.T, js jetstream.JetStream, id string) []int64 {
+func resolvedTicks(t *testing.T, js jetstream.JetStream, sectorID string) []int64 {
 	t.Helper()
 	ctx := natstest.Context(t)
 	cons, err := js.OrderedConsumer(ctx, streams.StreamEvents, jetstream.OrderedConsumerConfig{
-		FilterSubjects: []string{streams.SectorSubject(id)},
+		FilterSubjects: []string{streams.SectorSubject(sectorID)},
 	})
 	if err != nil {
 		t.Fatalf("consumer: %v", err)
@@ -55,7 +55,7 @@ func resolvedTicks(t *testing.T, js jetstream.JetStream, id string) []int64 {
 		if err := json.Unmarshal(msg.Data(), &ev); err != nil {
 			t.Fatalf("decode: %v", err)
 		}
-		if ev.Type != "TickResolved" || ev.Sector != id {
+		if ev.Type != "TickResolved" || ev.SectorID != sectorID {
 			t.Fatalf("unexpected event %+v", ev)
 		}
 		ticks = append(ticks, ev.Tick)
