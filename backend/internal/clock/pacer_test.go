@@ -132,3 +132,27 @@ func TestArmDuration(t *testing.T) {
 		}
 	}
 }
+
+func TestCurrentTick(t *testing.T) {
+	js := natstest.Start(t)
+	ctx := natstest.Context(t)
+
+	if _, err := CurrentTick(ctx, js); err == nil {
+		t.Fatal("CurrentTick succeeded on an empty clock")
+	}
+
+	bigBang(t, js)
+	if tick, err := CurrentTick(ctx, js); err != nil || tick != -1 {
+		t.Fatalf("before first tick = %d, %v; want -1", tick, err)
+	}
+
+	p := newPacer(t, js, "a", &recorder{})
+	for want := range int64(3) {
+		if err := p.attempt(ctx); err != nil {
+			t.Fatalf("attempt: %v", err)
+		}
+		if tick, err := CurrentTick(ctx, js); err != nil || tick != want {
+			t.Fatalf("after tick %d = %d, %v", want, tick, err)
+		}
+	}
+}

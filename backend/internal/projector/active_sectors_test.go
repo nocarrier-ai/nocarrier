@@ -1,4 +1,4 @@
-package project
+package projector
 
 import (
 	"maps"
@@ -20,7 +20,6 @@ func TestRoute(t *testing.T) {
 	}{
 		{"pending tick", `{"type":"TickResolved","sector_id":"s1","tick":4,"pending":true}`, "s1", true, 4},
 		{"idle tick", `{"type":"TickResolved","sector_id":"s1","tick":4,"pending":false}`, "s1", false, 4},
-		{"doctrine with sector", `{"type":"DoctrineUpdated","avatar_id":"a1","sector_id":"s9"}`, "s9", true, -1},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -44,11 +43,11 @@ func TestRoute(t *testing.T) {
 
 func TestRouteSkips(t *testing.T) {
 	for name, data := range map[string]string{
-		"doctrine without sector": `{"type":"DoctrineUpdated","avatar_id":"a1"}`,
-		"tick without sector":     `{"type":"TickResolved","tick":4,"pending":true}`,
-		"plan revised":            `{"type":"PlanRevised","avatar_id":"a1"}`,
-		"unknown type":            `{"type":"Nope"}`,
-		"bad json":                `{`,
+		"doctrine updated":    `{"type":"DoctrineUpdated","avatar_id":"a1","sector_id":"s9"}`,
+		"tick without sector": `{"type":"TickResolved","tick":4,"pending":true}`,
+		"plan revised":        `{"type":"PlanRevised","avatar_id":"a1"}`,
+		"unknown type":        `{"type":"Nope"}`,
+		"bad json":            `{`,
 	} {
 		t.Run(name, func(t *testing.T) {
 			if _, f := route([]byte(data)); f != nil {
@@ -114,18 +113,17 @@ func TestActiveSectorsProjection(t *testing.T) {
 	natstest.Publish(t, js, streams.SectorSubject("s1"), sector.TickResolved{Type: "TickResolved", SectorID: "s1", Tick: 0, Pending: true})
 	waitFor(map[string]int64{"s1": 0})
 
-	natstest.Publish(t, js, streams.AvatarSubject("a1"), map[string]string{"type": "DoctrineUpdated", "avatar_id": "a1", "sector_id": "s9"})
-	waitFor(map[string]int64{"s1": 0, "s9": -1})
-
+	natstest.Publish(t, js, streams.AvatarSubject("a1"), map[string]string{"type": "AvatarCreated", "avatar_id": "a1"})
 	natstest.Publish(t, js, streams.PlanSubject("a1"), map[string]string{"type": "PlanRevised", "avatar_id": "a1"})
+	natstest.Publish(t, js, streams.DoctrineSubject("a1"), map[string]string{"type": "DoctrineUpdated", "avatar_id": "a1", "sector_id": "s9"})
 	natstest.Publish(t, js, streams.SectorSubject("s1"), sector.TickResolved{Type: "TickResolved", SectorID: "s1", Tick: 1, Pending: true})
-	waitFor(map[string]int64{"s1": 1, "s9": -1})
+	waitFor(map[string]int64{"s1": 1})
 
 	natstest.Publish(t, js, streams.SectorSubject("s1"), sector.TickResolved{Type: "TickResolved", SectorID: "s1", Tick: 2, Pending: false})
-	waitFor(map[string]int64{"s9": -1})
+	waitFor(map[string]int64{})
 
 	natstest.Publish(t, js, streams.SectorSubject("s1"), sector.TickResolved{Type: "TickResolved", SectorID: "s1", Tick: 3, Pending: true})
-	waitFor(map[string]int64{"s1": 3, "s9": -1})
+	waitFor(map[string]int64{"s1": 3})
 
 	cons, err := js.Consumer(ctx, streams.StreamEvents, "proj-active-sectors")
 	if err != nil {
@@ -135,8 +133,8 @@ func TestActiveSectorsProjection(t *testing.T) {
 	if err != nil {
 		t.Fatalf("consumer info: %v", err)
 	}
-	if info.NumPending != 0 || info.AckFloor.Consumer != 5 {
-		t.Errorf("consumer pending %d, acked %d; want 0 pending and 5 acked (plan event filtered out)",
+	if info.NumPending != 0 || info.AckFloor.Consumer != 4 {
+		t.Errorf("consumer pending %d, acked %d; want 0 pending and 4 acked (non-sector events filtered out)",
 			info.NumPending, info.AckFloor.Consumer)
 	}
 }

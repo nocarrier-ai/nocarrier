@@ -1,4 +1,4 @@
-package project
+package projector
 
 import (
 	"context"
@@ -21,10 +21,6 @@ type ActiveEntry struct {
 	Seq          uint64 `json:"seq"`
 }
 
-type doctrineUpdated struct {
-	SectorID string `json:"sector_id"`
-}
-
 type ActiveSectors struct {
 	kv  jetstream.KeyValue
 	log *slog.Logger
@@ -41,10 +37,10 @@ func NewActiveSectors(ctx context.Context, js jetstream.JetStream, log *slog.Log
 func (a *ActiveSectors) Name() string { return "active-sectors" }
 
 func (a *ActiveSectors) FilterSubjects() []string {
-	return []string{streams.SectorEvents, streams.AvatarEvents}
+	return []string{streams.SectorEvents}
 }
 
-// ActiveSectors implements dispatch.ReadModels.
+// ActiveSectors implements dispatch.ActiveSectors.
 func (a *ActiveSectors) ActiveSectors(ctx context.Context) (map[string]int64, error) {
 	out := map[string]int64{}
 	lister, err := a.kv.ListKeys(ctx)
@@ -66,11 +62,6 @@ func (a *ActiveSectors) ActiveSectors(ctx context.Context) (map[string]int64, er
 		out[sectorID] = e.LastResolved
 	}
 	return out, nil
-}
-
-// DueAvatars stays stubbed until the due-avatars projection exists.
-func (a *ActiveSectors) DueAvatars(context.Context, int64) ([]string, error) {
-	return nil, nil
 }
 
 func (a *ActiveSectors) Apply(ctx context.Context, msg jetstream.Msg) error {
@@ -144,12 +135,6 @@ func route(data []byte) (string, fold) {
 			e.LastResolved = max(e.LastResolved, ev.Tick)
 			return ev.Pending
 		}
-	case "DoctrineUpdated":
-		var ev doctrineUpdated
-		if json.Unmarshal(data, &ev) != nil || ev.SectorID == "" {
-			return "", nil
-		}
-		return ev.SectorID, func(*ActiveEntry) bool { return true }
 	}
 	return "", nil
 }

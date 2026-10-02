@@ -161,9 +161,9 @@ Event streams (file storage, S2 compression where large, AllowDirect):
 
 - `CLOCK`     clock.universe          UniverseCreated, TickAdvanced
 - `EVENTS`    sector.<sector_id>      one TickResolved per sector-tick
-              avatar.<avatar_id>      avatar lifecycle; DoctrineUpdated until it
-                                      moves to doctrine.<avatar_id>
+              avatar.<avatar_id>      avatar lifecycle
               plan.<avatar_id>        PlanRevised
+              doctrine.<avatar_id>    DoctrineUpdated
 - `DECISIONS` decisions.<avatar_id>   decision records; MaxMsgsPerSubject caps
                                       per-player history depth
 
@@ -186,14 +186,16 @@ KV buckets (all rebuildable by replay):
 - `due-avatars`     dispatcher input: cadence + triggers per tick
 - `avatar-status`   Phoenix-facing current state
 - `leaderboards`    Phoenix-facing rankings
+- `doctrine`        Phoenix-facing latest doctrine per avatar
 
 ## Projections
 
 Each projection is one sequential durable consumer (`MaxAckPending` 1) on
 `EVENTS`, filtered to the aggregate kinds it folds, so it sees a single
 ordered sequence across aggregates. Every entry stores its value together with
-the last applied stream sequence. A redelivered or replayed event at or below
-the stored sequence is skipped. One consumer means one writer per entry, so a
+the last applied stream sequence, or the aggregate's revision when each event
+carries the aggregate's full state. A redelivered or replayed event at or below
+the stored value is skipped. One consumer means one writer per entry, so a
 write is a single revision-checked update; a conflict naks and the redelivery
 re-reads. This is what keeps projections idempotent while events stay deltas.
 
@@ -202,13 +204,12 @@ event struct. Nothing reacts to an event by sending a command: cross-aggregate
 effects are projection updates that the tick dispatcher reads.
 
 `active-sectors` (implemented) is the dispatcher's read model. It folds
-`sector.*` and `avatar.*`. Entry per sector: `{last_resolved, seq}`.
+`sector.*`. Entry per sector: `{last_resolved, seq}`.
 
 TickResolved advances
 `last_resolved` and deletes the entry when pending is false. 
 
-DoctrineUpdated with a sector creates/keeps the entry (activation only). A
-sector not in the bucket costs nothing. Rules the real resolver must honor:
+A sector not in the bucket costs nothing. Rules the real resolver must honor:
 pending is false only when the sector's next tick is provably a no-op
 (pending must stay true while intents remain, ships with standing orders are
 present, or doctrine is undelivered). 
@@ -221,6 +222,11 @@ Known edge to fix: activation creates entries at last_resolved -1, which trigger
 harmless catch-up burst from tick 0. Activation events should carry a tick
 stamp (or the fold should read the CLOCK head) before real use.
 
+`doctrine` (implemented) folds `doctrine.*` into the `doctrine` bucket, keyed
+by avatar ID. The value is the latest DoctrineUpdated itself (revision, tick,
+hash, orders, hooks); an event whose revision is not newer than the stored one
+is skipped. Phoenix reads it to show the current doctrine.
+
 ## Services (Phoenix contract)
 
 Phoenix (web app; also hosts telnet via ThousandIsland under its own
@@ -229,7 +235,8 @@ enforce this. The contract is:
 
 - **Commands**: request/reply to the command micro service (queue group), e.g.
   cmd.doctrine.update -> validate -> append DoctrineUpdated -> reply with
-  revision. The reply means accepted, not delivered; delivery is game state.
+  `{revision, tick, hash}`. Invalid doctrine replies 400, a lost race 409.
+  The reply means accepted, not delivered; delivery is game state.
 - **Current state**: read KV buckets directly; KV watches drive live updates.
 - **History**: request/reply to the query micro service, e.g.
   query.decisions.page reads decisions.<avatar_id> by time window with an
@@ -275,7 +282,7 @@ commands redeliver, projections resume from durable cursors.
 Monorepo github.com/nocarrier-ai/nocarrier:
 
 - `backend/` -  Go module (this design); cmd/nocarrierd + internal/{loop,
-             streams, clock, dispatch, sector, decide, project, service,
+             streams, clock, dispatch, sector, decide, projector, service,
              devnats, natstest (test-only)}
 - `web/`       Phoenix app (LiveView + telnet), NATS via Gnat, per-node feed
              subscription manager rebroadcasting via local PubSub

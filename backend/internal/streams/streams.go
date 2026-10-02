@@ -17,20 +17,23 @@ const (
 
 	SubjectClock = "clock.universe"
 
-	SectorEvents = "sector.*"
-	AvatarEvents = "avatar.*"
-	PlanEvents   = "plan.*"
+	SectorEvents   = "sector.*"
+	AvatarEvents   = "avatar.*"
+	PlanEvents     = "plan.*"
+	DoctrineEvents = "doctrine.*"
 
 	BucketSectorState  = "sector-state"
 	BucketActive       = "active-sectors"
 	BucketDue          = "due-avatars"
 	BucketAvatarStatus = "avatar-status"
 	BucketLeaderboards = "leaderboards"
+	BucketDoctrine     = "doctrine"
 )
 
 func SectorSubject(sectorID string) string    { return "sector." + sectorID }
 func AvatarSubject(avatarID string) string    { return "avatar." + avatarID }
 func PlanSubject(avatarID string) string      { return "plan." + avatarID }
+func DoctrineSubject(avatarID string) string  { return "doctrine." + avatarID }
 func DecisionsSubject(avatarID string) string { return "decisions." + avatarID }
 func ExecuteSubject(sectorID string) string   { return "execute." + sectorID }
 func DecideSubject(avatarID string) string    { return "decide." + avatarID }
@@ -55,7 +58,7 @@ func Ensure(ctx context.Context, js jetstream.JetStream, replicas int, tickPerio
 		},
 		{
 			Name:        StreamEvents,
-			Subjects:    []string{SectorEvents, AvatarEvents, PlanEvents},
+			Subjects:    []string{SectorEvents, AvatarEvents, PlanEvents, DoctrineEvents},
 			Storage:     jetstream.FileStorage,
 			Compression: jetstream.S2Compression,
 			Replicas:    replicas,
@@ -92,7 +95,7 @@ func Ensure(ctx context.Context, js jetstream.JetStream, replicas int, tickPerio
 			return fmt.Errorf("stream %s: %w", cfg.Name, err)
 		}
 	}
-	for _, b := range []string{BucketSectorState, BucketActive, BucketDue, BucketAvatarStatus, BucketLeaderboards} {
+	for _, b := range []string{BucketSectorState, BucketActive, BucketDue, BucketAvatarStatus, BucketLeaderboards, BucketDoctrine} {
 		cfg := jetstream.KeyValueConfig{Bucket: b, Storage: jetstream.FileStorage, Replicas: replicas}
 		if _, err := js.CreateOrUpdateKeyValue(ctx, cfg); err != nil {
 			return fmt.Errorf("bucket %s: %w", b, err)

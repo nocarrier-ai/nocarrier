@@ -184,6 +184,21 @@ func (p *Pacer) attempt(ctx context.Context) error {
 	}
 }
 
+func CurrentTick(ctx context.Context, js jetstream.JetStream) (int64, error) {
+	var ev TickAdvanced
+	seq, err := streams.Last(ctx, js, streams.StreamClock, streams.SubjectClock, &ev)
+	if err != nil {
+		return 0, err
+	}
+	if seq == 0 {
+		return 0, errors.New("clock has no events")
+	}
+	if ev.Type != "TickAdvanced" {
+		return -1, nil
+	}
+	return ev.Tick, nil
+}
+
 func (p *Pacer) readHead(ctx context.Context) (observed, error) {
 	var ev TickAdvanced
 	seq, err := streams.Last(ctx, p.js, streams.StreamClock, streams.SubjectClock, &ev)

@@ -1,8 +1,8 @@
-// Package project runs the projections: sequential consumers over the event
+// Package projector runs the projections: sequential consumers over the event
 // streams writing KV read models. Each entry stores its value together with
 // the stream sequence of the last event applied, so redeliveries are skipped
 // and every read model can be rebuilt by replay.
-package project
+package projector
 
 import (
 	"context"
@@ -30,10 +30,10 @@ type Loop struct {
 }
 
 func NewLoop(js jetstream.JetStream, log *slog.Logger, p Projection) *Loop {
-	return &Loop{js: js, log: log.With("loop", "project", "projection", p.Name()), proj: p}
+	return &Loop{js: js, log: log.With("loop", "projector", "projection", p.Name()), proj: p}
 }
 
-func (l *Loop) Name() string { return "project-" + l.proj.Name() }
+func (l *Loop) Name() string { return "projector-" + l.proj.Name() }
 
 func (l *Loop) Run(ctx context.Context) error {
 	cons, err := l.js.CreateOrUpdateConsumer(ctx, streams.StreamEvents, jetstream.ConsumerConfig{

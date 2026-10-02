@@ -18,31 +18,33 @@ import (
 )
 
 type Dispatcher struct {
-	js  jetstream.JetStream
-	kv  ReadModels
-	log *slog.Logger
+	js      jetstream.JetStream
+	sectors ActiveSectors
+	avatars DueAvatars
+	log     *slog.Logger
 }
 
-// ReadModels supplies the two projections the dispatcher reads. Implemented
-// over the active-sectors and due-avatars KV buckets; stubbed in tests.
-type ReadModels interface {
+type ActiveSectors interface {
 	// ActiveSectors returns each sector with unresolved work and the last
 	// tick it resolved, so stragglers can be re-dispatched.
 	ActiveSectors(ctx context.Context) (map[string]int64, error)
+}
+
+type DueAvatars interface {
 	// DueAvatars returns the avatars whose cadence or triggers make them
 	// due to decide at tick.
 	DueAvatars(ctx context.Context, tick int64) ([]string, error)
 }
 
-func New(js jetstream.JetStream, kv ReadModels, log *slog.Logger) *Dispatcher {
-	return &Dispatcher{js: js, kv: kv, log: log.With("loop", "dispatch")}
+func New(js jetstream.JetStream, sectors ActiveSectors, avatars DueAvatars, log *slog.Logger) *Dispatcher {
+	return &Dispatcher{js: js, sectors: sectors, avatars: avatars, log: log.With("loop", "dispatch")}
 }
 
 // Dispatch publishes the fans for tick. Called only by the pacer that won
 // the tick. Idempotent: every publish carries a deterministic Msg-Id, so a
 // partial fan re-published by the next winner deduplicates.
 func (d *Dispatcher) Dispatch(ctx context.Context, tick int64) error {
-	active, err := d.kv.ActiveSectors(ctx)
+	active, err := d.sectors.ActiveSectors(ctx)
 	if err != nil {
 		return fmt.Errorf("active sectors: %w", err)
 	}
@@ -59,7 +61,7 @@ func (d *Dispatcher) Dispatch(ctx context.Context, tick int64) error {
 		}
 	}
 
-	due, err := d.kv.DueAvatars(ctx, tick)
+	due, err := d.avatars.DueAvatars(ctx, tick)
 	if err != nil {
 		return fmt.Errorf("due avatars: %w", err)
 	}

@@ -5,20 +5,39 @@ package service
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
+	"time"
 
 	"github.com/nats-io/nats.go"
 	"github.com/nats-io/nats.go/micro"
+
+	"github.com/nocarrier-ai/nocarrier/internal/doctrine"
+	"github.com/nocarrier-ai/nocarrier/internal/streams"
 )
 
-type Services struct {
-	nc  *nats.Conn
-	log *slog.Logger
+const requestTimeout = 5 * time.Second
+
+type DoctrineUpdater interface {
+	Update(ctx context.Context, cmd doctrine.UpdateDoctrine) (doctrine.DoctrineUpdated, error)
 }
 
-func New(nc *nats.Conn, log *slog.Logger) *Services {
-	return &Services{nc: nc, log: log.With("loop", "services")}
+type DoctrineUpdateReply struct {
+	Revision int64  `json:"revision"`
+	Tick     int64  `json:"tick"`
+	Hash     string `json:"hash"`
+}
+
+type Services struct {
+	nc       *nats.Conn
+	log      *slog.Logger
+	doctrine DoctrineUpdater
+}
+
+func New(nc *nats.Conn, log *slog.Logger, d DoctrineUpdater) *Services {
+	return &Services{nc: nc, log: log.With("loop", "services"), doctrine: d}
 }
 
 func (s *Services) Name() string { return "services" }
@@ -35,7 +54,8 @@ func (s *Services) Run(ctx context.Context) error {
 	defer func() { _ = cmd.Stop() }()
 
 	grp := cmd.AddGroup("cmd")
-	if err := grp.AddEndpoint("doctrine-update", micro.HandlerFunc(s.doctrineUpdate),
+	doctrineUpdate := func(req micro.Request) { s.doctrineUpdate(ctx, req) }
+	if err := grp.AddEndpoint("doctrine-update", micro.HandlerFunc(doctrineUpdate),
 		micro.WithEndpointSubject("doctrine.update")); err != nil {
 		return fmt.Errorf("endpoint: %w", err)
 	}
@@ -61,10 +81,27 @@ func (s *Services) Run(ctx context.Context) error {
 	return nil
 }
 
-func (s *Services) doctrineUpdate(req micro.Request) {
-	// TODO: decode proto/api command, validate, append DoctrineUpdated to
-	// avatar.<id>, reply with the accepted revision.
-	_ = req.Error("501", "not implemented", nil)
+func (s *Services) doctrineUpdate(ctx context.Context, req micro.Request) {
+	var cmd doctrine.UpdateDoctrine
+	if err := json.Unmarshal(req.Data(), &cmd); err != nil {
+		_ = req.Error("400", "malformed doctrine update: "+err.Error(), nil)
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(ctx, requestTimeout)
+	defer cancel()
+	ev, err := s.doctrine.Update(ctx, cmd)
+	switch {
+	case err == nil:
+		_ = req.RespondJSON(DoctrineUpdateReply{Revision: ev.Revision, Tick: ev.Tick, Hash: ev.Hash})
+	case errors.Is(err, doctrine.ErrInvalid):
+		_ = req.Error("400", err.Error(), nil)
+	case errors.Is(err, streams.ErrConflict):
+		_ = req.Error("409", "doctrine changed concurrently, resubmit", nil)
+	default:
+		s.log.Error("doctrine update", "avatar_id", cmd.AvatarID, "err", err)
+		_ = req.Error("500", "doctrine update failed", nil)
+	}
 }
 
 func (s *Services) decisionLog(req micro.Request) {

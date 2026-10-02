@@ -28,8 +28,9 @@ import (
 	"github.com/nocarrier-ai/nocarrier/internal/decide"
 	"github.com/nocarrier-ai/nocarrier/internal/devnats"
 	"github.com/nocarrier-ai/nocarrier/internal/dispatch"
+	"github.com/nocarrier-ai/nocarrier/internal/doctrine"
 	"github.com/nocarrier-ai/nocarrier/internal/loop"
-	"github.com/nocarrier-ai/nocarrier/internal/project"
+	"github.com/nocarrier-ai/nocarrier/internal/projector"
 	"github.com/nocarrier-ai/nocarrier/internal/sector"
 	"github.com/nocarrier-ai/nocarrier/internal/service"
 	"github.com/nocarrier-ai/nocarrier/internal/streams"
@@ -90,21 +91,22 @@ func run() error {
 	}
 	log.Info("universe", "tick_period", universe.TickPeriod.String())
 
-	// Wiring. Resolver, Model, and ReadModels get real implementations as
-	// the game rules land; the seams keep the loops testable meanwhile.
-
-	active, err := project.NewActiveSectors(ctx, js, log)
+	active, err := projector.NewActiveSectors(ctx, js, log)
 	if err != nil {
 		return err
 	}
-	dispatcher := dispatch.New(js, active, log)
+	doctrineProjection, err := projector.NewDoctrine(ctx, js)
+	if err != nil {
+		return err
+	}
+	dispatcher := dispatch.New(js, active, noDueAvatars{}, log)
 	pacer, err := clock.NewPacer(js, log, cfg.instanceID, universe.TickPeriod, dispatcher)
 	if err != nil {
 		return err
 	}
 	execPool := sector.NewPool(js, log, cfg.executeWorkers, toyResolver{})
 	decidePool := decide.NewPool(js, log, cfg.decideWorkers, notImplementedModel{})
-	services := service.New(nc, log)
+	services := service.New(nc, log, doctrine.NewHandler(js))
 
 	health := startHealth(cfg.httpAddr, nc, log)
 	defer func() {
@@ -113,10 +115,11 @@ func run() error {
 		_ = health.Shutdown(sctx)
 	}()
 
-	loops := []loop.Loop{pacer, execPool, decidePool, services, project.NewLoop(js, log, active)}
-
-	// TODO: append project.NewLoop(js, log, <projection>) per projection
-	// once the concrete projections exist.
+	loops := []loop.Loop{
+		pacer, execPool, decidePool, services,
+		projector.NewLoop(js, log, active),
+		projector.NewLoop(js, log, doctrineProjection),
+	}
 	return loop.Supervise(ctx, log, loops...)
 }
 
@@ -289,6 +292,12 @@ func envDuration(key string, def time.Duration) (time.Duration, error) {
 }
 
 // Seams awaiting real implementations.
+
+type noDueAvatars struct{}
+
+func (noDueAvatars) DueAvatars(context.Context, int64) ([]string, error) {
+	return nil, nil
+}
 
 type toyResolver struct{}
 

@@ -19,6 +19,7 @@ func TestSubjectsRouteToStreams(t *testing.T) {
 		{streams.SectorSubject("s1"), streams.StreamEvents},
 		{streams.AvatarSubject("a1"), streams.StreamEvents},
 		{streams.PlanSubject("a1"), streams.StreamEvents},
+		{streams.DoctrineSubject("a1"), streams.StreamEvents},
 		{streams.DecisionsSubject("a1"), streams.StreamDecisions},
 		{streams.ExecuteSubject("s1"), streams.StreamExecute},
 		{streams.DecideSubject("a1"), streams.StreamDecide},
@@ -42,6 +43,7 @@ func TestEventsRejectsMultiTokenIDs(t *testing.T) {
 		streams.SectorSubject("a.b"),
 		streams.AvatarSubject("a.b"),
 		streams.PlanSubject("a.b"),
+		streams.DoctrineSubject("a.b"),
 	} {
 		if _, err := js.Publish(ctx, subject, []byte(`{}`)); err == nil {
 			t.Errorf("publish %s succeeded, want no stream", subject)
