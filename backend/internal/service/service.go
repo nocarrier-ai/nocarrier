@@ -14,6 +14,7 @@ import (
 	"github.com/nats-io/nats.go"
 	"github.com/nats-io/nats.go/micro"
 
+	"github.com/nocarrier-ai/nocarrier/internal/avatar"
 	"github.com/nocarrier-ai/nocarrier/internal/doctrine"
 	"github.com/nocarrier-ai/nocarrier/internal/streams"
 )
@@ -24,20 +25,34 @@ type DoctrineUpdater interface {
 	Update(ctx context.Context, cmd doctrine.UpdateDoctrine) (doctrine.DoctrineUpdated, error)
 }
 
+type AdmiralCommissioner interface {
+	Commission(ctx context.Context, cmd avatar.CommissionAdmiral) (avatar.AdmiralCommissioned, error)
+}
+
 type DoctrineUpdateReply struct {
 	Revision int64  `json:"revision"`
 	Tick     int64  `json:"tick"`
 	Hash     string `json:"hash"`
 }
 
+// AvatarCommissionReply tells the player where their flagship appeared and
+// when. Accepted means the admiral exists, not that it has done anything yet.
+type AvatarCommissionReply struct {
+	AvatarID   string `json:"avatar_id"`
+	ShipName   string `json:"ship_name"`
+	HomeSector string `json:"home_sector"`
+	Tick       int64  `json:"tick"`
+}
+
 type Services struct {
 	nc       *nats.Conn
 	log      *slog.Logger
 	doctrine DoctrineUpdater
+	avatars  AdmiralCommissioner
 }
 
-func New(nc *nats.Conn, log *slog.Logger, d DoctrineUpdater) *Services {
-	return &Services{nc: nc, log: log.With("loop", "services"), doctrine: d}
+func New(nc *nats.Conn, log *slog.Logger, d DoctrineUpdater, a AdmiralCommissioner) *Services {
+	return &Services{nc: nc, log: log.With("loop", "services"), doctrine: d, avatars: a}
 }
 
 func (s *Services) Name() string { return "services" }
@@ -57,6 +72,11 @@ func (s *Services) Run(ctx context.Context) error {
 	doctrineUpdate := func(req micro.Request) { s.doctrineUpdate(ctx, req) }
 	if err := grp.AddEndpoint("doctrine-update", micro.HandlerFunc(doctrineUpdate),
 		micro.WithEndpointSubject("doctrine.update")); err != nil {
+		return fmt.Errorf("endpoint: %w", err)
+	}
+	avatarCommission := func(req micro.Request) { s.avatarCommission(ctx, req) }
+	if err := grp.AddEndpoint("avatar-commission", micro.HandlerFunc(avatarCommission),
+		micro.WithEndpointSubject("avatar.commission")); err != nil {
 		return fmt.Errorf("endpoint: %w", err)
 	}
 
@@ -101,6 +121,35 @@ func (s *Services) doctrineUpdate(ctx context.Context, req micro.Request) {
 	default:
 		s.log.Error("doctrine update", "avatar_id", cmd.AvatarID, "err", err)
 		_ = req.Error("500", "doctrine update failed", nil)
+	}
+}
+
+func (s *Services) avatarCommission(ctx context.Context, req micro.Request) {
+	var cmd avatar.CommissionAdmiral
+	if err := json.Unmarshal(req.Data(), &cmd); err != nil {
+		_ = req.Error("400", "malformed admiral commission: "+err.Error(), nil)
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(ctx, requestTimeout)
+	defer cancel()
+	ev, err := s.avatars.Commission(ctx, cmd)
+	switch {
+	case err == nil:
+		_ = req.RespondJSON(AvatarCommissionReply{
+			AvatarID:   ev.AvatarID,
+			ShipName:   ev.ShipName,
+			HomeSector: ev.HomeSector,
+			Tick:       ev.Tick,
+		})
+	case errors.Is(err, avatar.ErrInvalid):
+		_ = req.Error("400", err.Error(), nil)
+	case errors.Is(err, avatar.ErrAlreadyCommissioned):
+		// Permanent, unlike the doctrine 409: resubmitting never helps.
+		_ = req.Error("409", "admiral already commissioned", nil)
+	default:
+		s.log.Error("avatar commission", "avatar_id", cmd.AvatarID, "err", err)
+		_ = req.Error("500", "admiral commission failed", nil)
 	}
 }
 

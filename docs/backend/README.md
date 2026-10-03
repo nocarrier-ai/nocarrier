@@ -22,7 +22,8 @@ Strict event sourcing terms apply throughout.
   produces events or a rejection. Commands are never replayed and never part
   of rebuilding state. A rejected command _never_ produces an event.
 - **Aggregate**: the consistency boundary. The **sector** is the main aggregate, the
-  **universe clock** is a second, single-instance aggregate. Fleet admirals (avatars) have their
+  **universe clock** is a second, single-instance aggregate. The **avatar** (a fleet admiral and
+  its flagship) is a third, owning identity and lifecycle; admirals also have their
   own subjects for doctrine and plans. Each aggregate instance owns exactly one subject,
   `<kind>.<id>`, and that subject is its consistency boundary.
 - **Projection**: a fold over event streams into a read model (KV bucket). Every read
@@ -108,6 +109,14 @@ All instances share one durable pull consumer on `EXECUTE`. A handler for
 1. Reads the last event on `sector.S` (tick L at stream sequence Q).
 2. _L >= T_: already resolved (duplicate or redelivery). Ack, done.
 3. _L < T-1_: predecessor not resolved yet; nak with delay and wait.
+3a. _Q == 0_ (no events at all): every sector exists from the big bang, but an
+   idle one has resolved nothing, so there is no tick T-1 to wait for. It
+   resolves whatever tick first gives it work, and is an ordinary sector with
+   history from then on. The dispatcher sends a never-resolved sector exactly
+   one tick, and a handler that dies is redelivered well inside one tick
+   period, so two of its commands are only ever in flight if a resolver hangs
+   for longer than a tick. Even then the guarded append admits one and the
+   loser is re-dispatched.
 4. _L == T-1_: load the sector-state read model, replay any `sector.S` tail past
    its recorded sequence, run the resolver (a pure deterministic function of
    state, intents, doctrine deliveries, seed(universe seed, S, T)), and
@@ -161,7 +170,7 @@ Event streams (file storage, S2 compression where large, AllowDirect):
 
 - `CLOCK`     clock.universe          UniverseCreated, TickAdvanced
 - `EVENTS`    sector.<sector_id>      one TickResolved per sector-tick
-              avatar.<avatar_id>      avatar lifecycle
+              avatar.<avatar_id>      AdmiralCommissioned, later lifecycle
               plan.<avatar_id>        PlanRevised
               doctrine.<avatar_id>    DoctrineUpdated
 - `DECISIONS` decisions.<avatar_id>   decision records; MaxMsgsPerSubject caps
@@ -203,11 +212,26 @@ Projections switch on the event type and decode into the owning aggregate's
 event struct. Nothing reacts to an event by sending a command: cross-aggregate
 effects are projection updates that the tick dispatcher reads.
 
-`active-sectors` (implemented) is the dispatcher's read model. It folds
-`sector.*`. Entry per sector: `{last_resolved, seq}`.
+`active-sectors` (implemented) is the dispatcher's execute-side read model. It
+folds `sector.*` and `avatar.*`. Entry per sector: `{last_resolved, seq}`.
 
 TickResolved advances
 `last_resolved` and deletes the entry when pending is false. 
+AdmiralCommissioned puts the new flagship's home sector in the bucket, stamping
+`last_resolved` with the tick *before* the commissioning tick, so the sector
+resolves forward from the commissioning tick itself. The stamp is one behind
+because `last_resolved` means a tick that really did resolve on `sector.<id>`;
+claiming the commissioning tick would skip it. Anchoring to the event's tick
+rather than a hardcoded -1 is what keeps the dispatcher from replaying every
+tick since the big bang. `max` means a sector other ships have already resolved
+past never regresses.
+
+An entry here means a sector has work, not that it exists: every sector exists
+from the big bang, which fixes the map and the link routes between sectors.
+Idle sectors are simply absent. This is the only activation path today, and it is what makes
+commissioning start the game: with no entry here the home sector is never
+dispatched an ExecuteTick and the new flagship sits in a sector that never
+resolves a tick. 
 
 A sector not in the bucket costs nothing. Rules the real resolver must honor:
 pending is false only when the sector's next tick is provably a no-op
@@ -218,14 +242,35 @@ Known TODO: when movement is coded, the
 projection must also upsert the destination sector's entry for each
 `ShipMoved` outcome, or ships arrive into dead sectors and stall. 
 
-Known edge to fix: activation creates entries at last_resolved -1, which triggers a
-harmless catch-up burst from tick 0. Activation events should carry a tick
-stamp (or the fold should read the CLOCK head) before real use.
+Any future event that gives an idle sector work needs the same stamp: one tick
+behind the first tick the sector should resolve.
 
 `doctrine` (implemented) folds `doctrine.*` into the `doctrine` bucket, keyed
 by avatar ID. The value is the latest DoctrineUpdated itself (revision, tick,
 hash, orders, hooks); an event whose revision is not newer than the stored one
 is skipped. Phoenix reads it to show the current doctrine.
+
+`avatar-status` (implemented) folds `avatar.*` into the `avatar-status` bucket,
+keyed by avatar ID. Commissioning creates the entry: who the admiral is and
+where the flagship started. Everything a player watches change — hull, fuel,
+credits, position — is not avatar-aggregate data; it changes when a sector
+resolves a tick, so this projection will fold `sector.*` once TickResolved
+carries those outcomes.
+
+`due-avatars` (implemented) is the dispatcher's decide-side read model. It folds
+`avatar.*` and `plan.*`. Entry per avatar: `{next_tick, seq}`.
+AdmiralCommissioned schedules the admiral on its commissioning tick (a new
+admiral has no plan yet), and PlanRevised pushes `next_tick` out by the cadence.
+Nothing records that a DecideNow was *dispatched*, only that a decision landed,
+so a lost command or a failed model call leaves the admiral due and the next
+tick's winner dispatches it again. That is the same straggler recovery the
+execute side gets from `active-sectors`.
+
+Known TODO: cadence is a package constant, one tick for everyone. Subscription
+tiers make it per avatar (free-tier admirals decide less often, thematically
+from slower communications), and triggers raised inside TickResolved must be
+able to pull `next_tick` forward before the cadence is up. A retired admiral has
+no removal path yet, because no lifecycle event retires one.
 
 ## Services (Phoenix contract)
 
@@ -237,6 +282,15 @@ enforce this. The contract is:
   cmd.doctrine.update -> validate -> append DoctrineUpdated -> reply with
   `{revision, tick, hash}`. Invalid doctrine replies 400, a lost race 409.
   The reply means accepted, not delivered; delivery is game state.
+  cmd.avatar.commission -> validate -> append AdmiralCommissioned -> reply with
+  `{avatar_id, ship_name, home_sector, tick}`, which starts the game
+  for a player. Commission-once is the guarded append itself: expecting last
+  sequence 0 on `avatar.<avatar_id>` admits exactly one commission, so there is
+  no read before it. An invalid command replies 400; an admiral who already
+  exists replies 409, and unlike the doctrine 409 that is permanent, not a
+  "resubmit". Every admiral spawns in sector 0; a real spawn picked from the
+  universe map is a TODO, as is the starting loadout, which no event carries
+  until there are economy rules to set it by.
 - **Current state**: read KV buckets directly; KV watches drive live updates.
 - **History**: request/reply to the query micro service, e.g.
   query.decisions.page reads decisions.<avatar_id> by time window with an

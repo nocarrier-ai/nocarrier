@@ -8,7 +8,6 @@ import (
 	"errors"
 	"fmt"
 	"maps"
-	"regexp"
 	"slices"
 	"strings"
 
@@ -31,8 +30,6 @@ var (
 var (
 	ErrInvalid = errors.New("invalid doctrine")
 )
-
-var validAvatarID = regexp.MustCompile(`^[A-Za-z0-9_-]+$`)
 
 type DoctrineData struct {
 	Orders []string          `json:"orders"`
@@ -127,7 +124,7 @@ func (c UpdateDoctrine) validate() error {
 	if c.AvatarID == "" {
 		return fmt.Errorf("%w: missing avatar ID", ErrInvalid)
 	}
-	if !validAvatarID.MatchString(c.AvatarID) {
+	if !streams.ValidID(c.AvatarID) {
 		return fmt.Errorf("%w: avatar ID %q may only contain letters, digits, '-' and '_'", ErrInvalid, c.AvatarID)
 	}
 	if len(c.Orders) == 0 {

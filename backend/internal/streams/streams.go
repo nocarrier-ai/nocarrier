@@ -3,6 +3,7 @@ package streams
 import (
 	"context"
 	"fmt"
+	"regexp"
 	"time"
 
 	"github.com/nats-io/nats.go/jetstream"
@@ -29,6 +30,14 @@ const (
 	BucketLeaderboards = "leaderboards"
 	BucketDoctrine     = "doctrine"
 )
+
+var validID = regexp.MustCompile(`^[A-Za-z0-9_-]+$`)
+
+// ValidID reports whether id can be the single token in a `<kind>.<id>`
+// subject. EVENTS binds `<kind>.*`, so an id carrying a dot, a wildcard or a
+// space has nowhere to land; aggregates validate their ids with this before
+// building a subject.
+func ValidID(id string) bool { return validID.MatchString(id) }
 
 func SectorSubject(sectorID string) string    { return "sector." + sectorID }
 func AvatarSubject(avatarID string) string    { return "avatar." + avatarID }

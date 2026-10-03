@@ -13,6 +13,16 @@ import (
 	"github.com/nocarrier-ai/nocarrier/internal/streams"
 )
 
+// resolveTimeout bounds one resolve, so a hung resolver cannot hold its command
+// across a tick boundary: the handler naks and the command is redelivered
+// instead. Far inside MinTickPeriod and inside AckWait. A var so tests can
+// lower it.
+var resolveTimeout = 5 * time.Second
+
+// ackWait is how long a command may sit unacked before redelivery. A handler
+// that dies gets its command back well inside one tick period.
+const ackWait = 30 * time.Second
+
 // Resolver is the pure game-rules function. Given the sector's replayed
 // state and the tick, it returns the outcome events. Deterministic: same
 // inputs, same bytes.
@@ -37,7 +47,7 @@ func (p *Pool) Run(ctx context.Context) error {
 	cons, err := p.js.CreateOrUpdateConsumer(ctx, streams.StreamExecute, jetstream.ConsumerConfig{
 		Durable:       "execute",
 		AckPolicy:     jetstream.AckExplicitPolicy,
-		AckWait:       30 * time.Second,
+		AckWait:       ackWait,
 		MaxAckPending: 4 * p.workers,
 	})
 	if err != nil {
@@ -81,20 +91,28 @@ func (p *Pool) handle(ctx context.Context, msg jetstream.Msg) {
 		return
 	}
 
-	switch {
-	case lastTick >= cmd.Tick:
+	if lastTick >= cmd.Tick {
 		// Already resolved (a duplicate command, or a redelivery after a
 		// stalled handler's append landed). Nothing to record.
 		_ = msg.Ack()
 		return
-	case lastTick < cmd.Tick-1:
-		// A predecessor tick hasn't resolved yet; its command is in the
-		// queue (straggler re-dispatch covers loss). Wait for it.
+	}
+
+	// Is this tick's predecessor resolved? Every sector exists from the big
+	// bang, but an idle one has never resolved anything, so its stream is
+	// empty and there is no predecessor to be out of order with: it resolves
+	// whatever tick first gives it work. A sector with history resolves
+	// strictly in order.
+	if lastSeq != 0 && lastTick != cmd.Tick-1 {
+		// The predecessor's command is in the queue (straggler re-dispatch
+		// covers loss). Wait for it.
 		_ = msg.NakWithDelay(time.Second)
 		return
 	}
 
-	outcomes, pending, err := p.resolve.Resolve(ctx, cmd.SectorID, cmd.Tick)
+	rctx, cancel := context.WithTimeout(ctx, resolveTimeout)
+	outcomes, pending, err := p.resolve.Resolve(rctx, cmd.SectorID, cmd.Tick)
+	cancel()
 	if err != nil {
 		log.Error("resolve", "err", err)
 		_ = msg.NakWithDelay(2 * time.Second)

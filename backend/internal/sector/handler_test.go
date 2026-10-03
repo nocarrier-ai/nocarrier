@@ -73,11 +73,13 @@ func waitDrained(t *testing.T, js jetstream.JetStream) {
 func TestPoolResolvesTicksInOrder(t *testing.T) {
 	js := startPool(t)
 	execute(t, js, "s1", 0)
+	waitDrained(t, js)
 	execute(t, js, "s1", 1)
+	execute(t, js, "s1", 2)
 	waitDrained(t, js)
 
-	if got := resolvedTicks(t, js, "s1"); !slices.Equal(got, []int64{0, 1}) {
-		t.Fatalf("resolved %v, want [0 1]", got)
+	if got := resolvedTicks(t, js, "s1"); !slices.Equal(got, []int64{0, 1, 2}) {
+		t.Fatalf("resolved %v, want [0 1 2]", got)
 	}
 }
 
@@ -93,14 +95,18 @@ func TestPoolIgnoresAlreadyResolvedTick(t *testing.T) {
 	}
 }
 
+// A sector with history resolves strictly in order however its commands
+// arrive: tick 2 waits for tick 1.
 func TestPoolWaitsForPredecessor(t *testing.T) {
 	js := startPool(t)
-	execute(t, js, "s1", 1)
 	execute(t, js, "s1", 0)
 	waitDrained(t, js)
+	execute(t, js, "s1", 2)
+	execute(t, js, "s1", 1)
+	waitDrained(t, js)
 
-	if got := resolvedTicks(t, js, "s1"); !slices.Equal(got, []int64{0, 1}) {
-		t.Fatalf("resolved %v, want [0 1]", got)
+	if got := resolvedTicks(t, js, "s1"); !slices.Equal(got, []int64{0, 1, 2}) {
+		t.Fatalf("resolved %v, want [0 1 2]", got)
 	}
 }
 
@@ -116,5 +122,26 @@ func TestPoolKeepsSectorsIndependent(t *testing.T) {
 	}
 	if got := resolvedTicks(t, js, "s2"); !slices.Equal(got, []int64{0, 1}) {
 		t.Errorf("s2 resolved %v, want [0 1]", got)
+	}
+}
+
+// Every sector exists from the big bang, but an idle one has resolved nothing,
+// so there is no tick-40 event to wait for. The tick that first gives it work
+// is the tick it resolves.
+func TestPoolResolvesFirstTickOfIdleSector(t *testing.T) {
+	js := startPool(t)
+	execute(t, js, "s1", 41)
+	waitDrained(t, js)
+
+	if got := resolvedTicks(t, js, "s1"); !slices.Equal(got, []int64{41}) {
+		t.Fatalf("resolved %v, want [41]", got)
+	}
+
+	// And from there it is an ordinary sector with history.
+	execute(t, js, "s1", 43)
+	execute(t, js, "s1", 42)
+	waitDrained(t, js)
+	if got := resolvedTicks(t, js, "s1"); !slices.Equal(got, []int64{41, 42, 43}) {
+		t.Fatalf("resolved %v, want [41 42 43]", got)
 	}
 }

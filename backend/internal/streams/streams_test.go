@@ -51,6 +51,37 @@ func TestEventsRejectsMultiTokenIDs(t *testing.T) {
 	}
 }
 
+func TestValidID(t *testing.T) {
+	for _, id := range []string{"0", "a1", "A-1", "fleet_admiral-akbar", "3f2b9c1e-7d4a-4f8e-9a6b-1c2d3e4f5a6b"} {
+		if !streams.ValidID(id) {
+			t.Errorf("ValidID(%q) = false, want true", id)
+		}
+	}
+	for _, id := range []string{"", "a.b", "a*", "a>", "a 1", "a/1", "kevin@relay", "a:1", "$a1", "ünit-7"} {
+		if streams.ValidID(id) {
+			t.Errorf("ValidID(%q) = true, want false", id)
+		}
+	}
+}
+
+// Every id ValidID admits must survive the round trip to a subject and back
+// as a single token; the rule exists only to protect that.
+func TestValidIDsPublishToEvents(t *testing.T) {
+	js := natstest.Start(t)
+	ctx := natstest.Context(t)
+
+	for _, id := range []string{"0", "a1", "A-1", "fleet_admiral-akbar"} {
+		for _, subject := range []string{
+			streams.SectorSubject(id), streams.AvatarSubject(id),
+			streams.PlanSubject(id), streams.DoctrineSubject(id),
+		} {
+			if _, err := js.Publish(ctx, subject, []byte(`{}`)); err != nil {
+				t.Errorf("publish %s: %v", subject, err)
+			}
+		}
+	}
+}
+
 func TestEnsureIsIdempotent(t *testing.T) {
 	js := natstest.Start(t)
 	if err := streams.Ensure(natstest.Context(t), js, 1, natstest.TickPeriod); err != nil {

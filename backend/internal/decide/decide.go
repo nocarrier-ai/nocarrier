@@ -12,6 +12,8 @@ import (
 	"github.com/nocarrier-ai/nocarrier/internal/streams"
 )
 
+const PlanRevisedType = "PlanRevised"
+
 // DecideNow commands a decision pass for one avatar at tick Tick.
 type DecideNow struct {
 	AvatarID string `json:"avatar_id"`
@@ -21,7 +23,7 @@ type DecideNow struct {
 // PlanRevised carries an avatar's full new intent queue. The current plan is
 // the last PlanRevised plus completions recorded in TickResolved events.
 type PlanRevised struct {
-	Type     string          `json:"type"` // "PlanRevised"
+	Type     string          `json:"type"` // PlanRevisedType
 	AvatarID string          `json:"avatar_id"`
 	Tick     int64           `json:"tick"`
 	Intents  json.RawMessage `json:"intents"`
@@ -93,7 +95,7 @@ func (p *Pool) handle(ctx context.Context, msg jetstream.Msg) {
 		return
 	}
 
-	rev := PlanRevised{Type: "PlanRevised", AvatarID: cmd.AvatarID, Tick: cmd.Tick, Intents: intents}
+	rev := PlanRevised{Type: PlanRevisedType, AvatarID: cmd.AvatarID, Tick: cmd.Tick, Intents: intents}
 	if err := p.append(ctx, streams.PlanSubject(cmd.AvatarID), rev); err != nil {
 		log.Warn("append PlanRevised", "err", err)
 		_ = msg.NakWithDelay(2 * time.Second)

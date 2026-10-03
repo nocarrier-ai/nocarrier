@@ -9,6 +9,7 @@ import (
 
 	"github.com/nats-io/nats.go/jetstream"
 
+	"github.com/nocarrier-ai/nocarrier/internal/avatar"
 	"github.com/nocarrier-ai/nocarrier/internal/sector"
 	"github.com/nocarrier-ai/nocarrier/internal/streams"
 )
@@ -36,8 +37,11 @@ func NewActiveSectors(ctx context.Context, js jetstream.JetStream, log *slog.Log
 
 func (a *ActiveSectors) Name() string { return "active-sectors" }
 
+// FilterSubjects includes avatar events because commissioning an admiral is
+// what first gives a sector work: no entry here means no ExecuteTick, and a
+// flagship would sit in a sector that never resolves a tick.
 func (a *ActiveSectors) FilterSubjects() []string {
-	return []string{streams.SectorEvents}
+	return []string{streams.SectorEvents, streams.AvatarEvents}
 }
 
 // ActiveSectors implements dispatch.ActiveSectors.
@@ -134,6 +138,25 @@ func route(data []byte) (string, fold) {
 		return ev.SectorID, func(e *ActiveEntry) bool {
 			e.LastResolved = max(e.LastResolved, ev.Tick)
 			return ev.Pending
+		}
+	case avatar.AdmiralCommissionedType:
+		var ev avatar.AdmiralCommissioned
+		if json.Unmarshal(data, &ev) != nil || ev.HomeSector == "" {
+			return "", nil
+		}
+		return ev.HomeSector, func(e *ActiveEntry) bool {
+			// The new flagship has standing orders to fall back on, so the
+			// sector has work from the commissioning tick onward: stamp the
+			// tick before it, because LastResolved means a tick that really
+			// did resolve on sector.<id>. Claiming the commissioning tick
+			// itself would skip it, and the execute handler would then
+			// refuse every later tick as having an unresolved predecessor.
+			// Anchoring to the tick (rather than leaving a fresh entry at
+			// -1) is still what keeps the dispatcher from replaying every
+			// tick since the big bang, and max never regresses a sector
+			// other ships have already resolved past.
+			e.LastResolved = max(e.LastResolved, ev.Tick-1)
+			return true
 		}
 	}
 	return "", nil

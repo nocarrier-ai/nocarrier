@@ -24,6 +24,7 @@ import (
 	"github.com/nats-io/nats.go"
 	"github.com/nats-io/nats.go/jetstream"
 
+	"github.com/nocarrier-ai/nocarrier/internal/avatar"
 	"github.com/nocarrier-ai/nocarrier/internal/clock"
 	"github.com/nocarrier-ai/nocarrier/internal/decide"
 	"github.com/nocarrier-ai/nocarrier/internal/devnats"
@@ -99,14 +100,22 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	dispatcher := dispatch.New(js, active, noDueAvatars{}, log)
+	avatarStatus, err := projector.NewAvatarStatus(ctx, js)
+	if err != nil {
+		return err
+	}
+	dueAvatars, err := projector.NewDueAvatars(ctx, js)
+	if err != nil {
+		return err
+	}
+	dispatcher := dispatch.New(js, active, dueAvatars, log)
 	pacer, err := clock.NewPacer(js, log, cfg.instanceID, universe.TickPeriod, dispatcher)
 	if err != nil {
 		return err
 	}
 	execPool := sector.NewPool(js, log, cfg.executeWorkers, toyResolver{})
 	decidePool := decide.NewPool(js, log, cfg.decideWorkers, notImplementedModel{})
-	services := service.New(nc, log, doctrine.NewHandler(js))
+	services := service.New(nc, log, doctrine.NewHandler(js), avatar.NewHandler(js))
 
 	health := startHealth(cfg.httpAddr, nc, log)
 	defer func() {
@@ -119,6 +128,8 @@ func run() error {
 		pacer, execPool, decidePool, services,
 		projector.NewLoop(js, log, active),
 		projector.NewLoop(js, log, doctrineProjection),
+		projector.NewLoop(js, log, avatarStatus),
+		projector.NewLoop(js, log, dueAvatars),
 	}
 	return loop.Supervise(ctx, log, loops...)
 }
@@ -292,12 +303,6 @@ func envDuration(key string, def time.Duration) (time.Duration, error) {
 }
 
 // Seams awaiting real implementations.
-
-type noDueAvatars struct{}
-
-func (noDueAvatars) DueAvatars(context.Context, int64) ([]string, error) {
-	return nil, nil
-}
 
 type toyResolver struct{}
 
