@@ -34,8 +34,10 @@ Strict event sourcing terms apply throughout.
 - **Plan**: an avatar's queue of intents. Revised by decisions, consumed by
   execution, and continues executing when no decision happens.
 - **Doctrine**: the avatar's standing orders, updated via command. Doctrine does
-  not apply instantly. It is delivered in-game thematically through relay coverage with
-  hop delay. An unreachable ship continues to run on the doctrine it last received and its current plan.
+  not apply instantly. Delivery latency is the relay hop count plus the final leg
+  out to the ship, times whatever the player's tier gets on the relays: free tier
+  rides free bandwidth and waits longer. An unreachable ship continues to run on the
+  doctrine it last received and its current plan.
 
 ## Game loop
 
@@ -46,7 +48,9 @@ Every tick (default 60s, never smaller than 30s, fixed in the "big bang" event):
    raised by the previous tick) get a decision pass. A decision asks the
    model typed questions (yes/no probability, choice over a legal-option
    menu, score), expands the answers into intents, and appends a full plan
-   revision plus a decision record. Free-tier avatars decide less frequently (thematically due to slower communications speed); their
+   revision plus a decision record. Cadence is a function of subscription tier and
+   nothing else — never of where the ship is. Free-tier avatars hold less relay
+   bandwidth, so they both consult less often and wait longer for new orders; their
    plans keep executing regardless.
 3. **Execute**: every active sector resolves once. The resolver consumes the
    next intent of each local avatar's plan (or falls back to deterministic
@@ -267,8 +271,8 @@ tick's winner dispatches it again. That is the same straggler recovery the
 execute side gets from `active-sectors`.
 
 Known TODO: cadence is a package constant, one tick for everyone. Subscription
-tiers make it per avatar (free-tier admirals decide less often, thematically
-from slower communications), and triggers raised inside TickResolved must be
+tiers make it per avatar (free-tier admirals hold less relay bandwidth and so
+consult less often), and triggers raised inside TickResolved must be
 able to pull `next_tick` forward before the cadence is up. A retired admiral has
 no removal path yet, because no lifecycle event retires one.
 

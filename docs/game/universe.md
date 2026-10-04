@@ -1,0 +1,470 @@
+# The Universe
+
+The universe is created once, at the _big bang_, and never regenerated. It is a
+graph of numbered **sectors** joined by directed **lanes**, with **ports** that
+produce and consume a handful of commodities. The parts of the universe
+described in this document are derived deterministically from the seed 
+recorded in the `UniverseCreated` event, so the
+map is not stored as events nor is it stored in a bucket. Any instance can
+recompute it, and every instance computes the same one.
+
+This is a modernized TradeWars 2002 universe. The original included numbered sectors, 
+a sparse mesh of space lanes, a hard cap on lanes per sector, one-way lanes as 
+an in-theme feature, dead ends worth hunting for, and a protected cluster around the 
+spawning zone. TW2002's profitable play was finding two _adjacent_ ports with 
+complementary economies, which made distance irrelevant and was mechanical enough
+that players automated it. Here the map has a trunk network, long hauls pay more 
+than short ones, and the really profitable routes are ones that have to be
+discovered.
+
+## Vocabulary
+
+- **Sector**: a node. Identified by a positive integer. Sectors have no
+  player-visible coordinates; position exists only inside the generator, to
+  decide which sectors are plausibly near each other.
+- **Lane**: a directed edge between two sectors. A two-way lane is two lane
+  records. A lane carries geometry only — its length, which the ship turns into
+  fuel burn and transit time. Whether a lane is published is a property of the 
+  lane. Every admiral sees the universe as a combination of public and published
+  lane maps as well as the ones they've discovered on their own.
+- **Core**: a small, densely connected, fully two-way, fully published cluster
+  containing the spawn area and the special ports. Protected space.
+- **Hub**: one of a small number of well-separated sectors that anchor the
+  trunk.
+- **Trunk**: the lanes connecting hubs to each other and to the core. Short,
+  two-way, published. The highways.
+- **Region**: the set of sectors nearest a given hub.
+- **Spur**: a lane into a sector with no other outbound lane worth taking. Since players cannot be trapped by rule, a spur has to allow the player to return to their last sector via the only lane available.
+- **Shortcut**: a lane joining two regions outside the trunk. Usually
+  unpublished. The prize.
+- **Pocket**: a sector reached by one one-way lane in, leaving by a one-way lane
+  to somewhere else, neither published. Concealed, never a trap.
+- **Published**: in the public map, which every admiral can see and which market
+  prices are computed from. Unpublished lanes work the same as published, only varying based on how admirals become aware of it.
+- **Known**: whether one particular admiral has discovered a lane. Per-avatar,
+  held in a read model, and never a field on the lane.
+- **Lead**: an unmapped exit an admiral has inferred without knowing where it
+  goes, from a sector reporting more lanes than the admiral can account for.
+- **Circuit**: a closed route an admiral runs, carrying a different commodity
+  on each leg. Directional, because one-way lanes mean you rarely come back the
+  way you went.
+
+## Knowledge and the public map
+
+**Private to one admiral.** You found the lane. Nobody else knows it exists.
+
+**Private to several.** You sold or gave away the coordinates. The buyer knows;
+the market does not. This is where the information economy lives, and it is
+deliberately _not_ publication — a lane can be known to a dozen admirals and
+still be worth money, because prices are computed from the public map and the
+public map has not moved.
+
+**Published.** In the public map. Every admiral can see it, prices recompute
+against it, and the margin secrecy was worth is gone.
+
+The big bang decides the initial public map: core and trunk lanes published,
+regional lanes mostly published, shortcuts and pocket lanes almost never.
+
+What an admiral **knows** is per-avatar and lives in a read model. It is never a
+field on the lane. **Using a lane does not publish it**. This means an individual
+admiral can see you using a lane and that observation saves them the time it would take
+to launch a probe. That lane doesn't automatically get published, though the viewing
+admiral can sell that information to publish it later.
+
+Knowledge spreads privately in three ways: you find a lane yourself, you buy it,
+or you are seen using it. If another ship sits in the origin sector when you depart 
+down an unpublished lane, that admiral now knows the lane is there. 
+It gives doctrine something concrete to decide, e.g. _do not take the shortcut if there is company in the sector._
+
+**The public map changes only when an admiral deliberately publishes.** Being
+observed spreads knowledge; it never publishes. Nothing in the simulation
+publishes a lane on its own.
+
+### Published sectors, and relays
+
+A sector is published when at least one published lane leads into it. Core
+sectors are published by construction, and a pocket reached only by unpublished
+lanes is an unpublished sector.
+
+**A relay can only be deployed in a published sector.** You cannot run a
+communications relay to somewhere the galaxy has no official route to.
+
+This is the sharpest tradeoff in the design and it falls out rather than being
+bolted on. Hide a colony in a pocket and it has no relay coverage: the admiral
+out there is beyond contact, running on whatever doctrine it last received,
+which is exactly the situation the game's fiction is built around. Publish the
+lane and you get communications and lose the secret. **Concealment and
+communication are opposed.**
+
+### Going dark
+
+The relay rule makes a submarine playstyle available. In this strategy, 
+you keep your colony or your port in an unpublished pocket. It has no relay
+coverage, so nothing reaches it and nothing leaves it. Then surface
+periodically: fly back out to a published sector, take on whatever doctrine has
+been waiting, send the accumulated reports, and dive again.
+
+What it costs:
+
+- **Stale orders.** Between surfacings the admiral runs on the last doctrine it
+  received and its current plan. The player cannot react to anything until the ship comes
+  up for air. (gets close enough to a relay)
+- **No telemetry.** The "while you were away" digest a player reads at a relay
+  is built from what the ship sent. A dark ship sends nothing, so the player is
+  blind too, and surfacing delivers the whole backlog at once. This is the most
+  BBS thing in the game: you dial in and a week of log lands on you.
+- **A signature.** Surfacing happens in public space where other admirals can
+  watch you arrive. Surface at the same sector on a regular rhythm and a patient
+  observer learns something lives one hop from there, and a density scan
+  confirms that sector has an exit nobody has mapped. The pattern works, but it
+  leaks. Varying where and when you surface is the counter, and so is surfacing
+  a long way from home.
+
+The demand it puts on the player is also interesting. Doctrine written for a
+ship you will not speak to for days has to be more conditional and more
+self-sufficient than doctrine for a trader working the core. A "submarine"
+player's standing orders look different in kind, and writing them well is the
+skill this game is designed to teach and reward.
+
+**Decision cadence doesn't depend on geography.** How often an admiral thinks
+is set by subscription tier and nothing else. What distance costs you is **order
+latency**: the number of ticks before new doctrine reaches the ship, a function
+of how many relay hops the orders cross and how far the ship sits from the last
+relay. A ship outside coverage has unbounded latency as it won't get any orders until 
+it gets within range of a relay (by movement or by constructing its own).
+
+Going dark therefore doesn't make an admiral stupider, it makes it take longer to
+receive new orders.
+
+Probes are unaffected, because a probe reports to the ship that launched it
+rather than through the relay network. An admiral outside the range of a relay
+can still explore perfectly fine assuming its doctrine takes this into account.
+
+### Why publish
+
+- **Charting bounty.** The galactic core pays for completed maps, more for lanes further
+  out. This enables a cartographer playstyle, where an admiral can skip trading and
+  combat and earn through pure exploration. The bounty is also the dial that sets 
+  how fast the public map fills, which is the same dial as how long discovery 
+  stays a living part of the game.
+- **You are the destination.** Once you own a port or a colony that needs
+  supplying, you want traffic. Publishing the short way in brings other
+  admirals' freighters to your door.
+- **Relay coverage**, per above. A route you are committed to long term may be
+  worth more with communications than with secrecy.
+- **Spite.** Publish a rival's lane to collapse their margin. You would only do
+  it for a lane you do not profit from, so the public map grows partly through
+  conflict.
+
+### Why not
+
+- It collapses the margin on your own route.
+- It tells competitors and pirates where you operate.
+- It exposes whatever you were hiding at the far end.
+
+### Secrecy can be a strategic advantage
+
+Permanent secrecy is not available in this game. Every lane departs from some 
+sector and the lanes departing from that sector can always be detected through
+probes or, if already traveled, they're visible to that admiral.
+
+It follows that discovery is an early-to-mid game phase rather than the permanent
+engine of the economy. The graph is finite and created once, so eventually every
+lane is known and only publication status varies. The long game is stock
+depletion, competition for routes, colony development and combat.
+
+## Discovery
+
+An admiral can't be expected to sweep thousands of sectors hoping to stumble on
+an unmapped exit. Discovery needs a signal that says where to look, and the
+signal has to arrive at range. There are 3 different ways discovery can happen,
+each with its own pros and cons.
+
+### Density scan
+
+Scans the sectors adjacent to the one you occupy, down published lanes and
+unpublished ones alike. Per sector it reports:
+
+- the sector id
+- its **total lane count**
+- a coarse activity reading: something large is present, without saying what
+- whether a port is there at all, since ports broadcast
+- if there's a relay in an adjacent sector, you can see the lane to it, even if you've never traveled it
+
+The lane count is the entire point. A sector that reports four lanes when you
+know two of them has two unmapped exits. The feature the model actually sees is a
+**lead**: _sector 412, two unmapped exits, reads quiet._ Information can thus
+be fed into exploration decision models with ranking and appropriate metadata.
+
+### Ether probe
+
+An expendable drone launched down one specific lane, including an unmapped one.
+It reports back after a delay, like everything else that travels. It returns:
+
+- where that lane actually goes
+- for each sector it crosses: lane count, activity, and any port's stances and
+  stock levels
+- whether it survived. A probe that never reports has told you something too.
+
+The report from the probe, or _lead_, might contain information like: 
+_The unmapped exit from 412 reaches 1879, which has a port consuming  provisions and no published route to a producer._ 
+That information can justify moving a ship.
+
+**A probe's report arriving is an event in its own right, and doctrine needs a
+hook for it.** Results land several ticks after launch, long after the decision
+that launched them, so the player has to be able to say in advance what to do
+with whatever comes back: _if a probe finds a port paying well for provisions
+and no published route to a producer, work it before anyone else finds it._
+
+Mechanically this needs no new machinery. The arrival raises a trigger, the
+trigger makes the avatar due early, and the decision pass runs with the probe's
+findings in perception and the player's hook text alongside them. The only code
+change is one more entry in doctrine's hook list, which is deliberately not
+added until probes exist to fire it.
+
+### Taking the lane
+
+You arrive somewhere, and if the lane was one-way you can't simply turn around. Doctrine
+chooses between probing first and jumping blind, which is a real risk axis for a
+player to write standing orders about.
+
+### What the model is given
+
+Exact numbers are pre-digested, per the backend design. The model does not see
+"six jumps, forty fuel, two hundred credits for a probe"; it sees a lead
+qualified as near or far, cheap or costly, quiet or busy, against an option menu
+Go has already filtered to the legal and the affordable. Go does the arithmetic
+and the graph search. The model decides whether an admiral who was told to trade
+first should spend three ticks chasing a rumour.
+
+## Nobody gets stranded
+
+**There are no traps.** An admiral can always get home. A sector that swallows a ship
+destroys a player's entire investment with no recourse.
+
+This is a rule about the whole universe, not a check the generator runs once.
+There are three ways to strand someone and strong connectivity only catches the
+first.
+
+**Topology.** A sector with no way out, or a region you can enter and not leave.
+The generator must prove the graph is strongly connected, and any later mechanic
+that can remove a lane — a collapse, a blockade, a severed corridor — has to
+preserve that or be refused.
+
+**Fuel.** A strongly connected graph does nothing for an admiral sitting in a
+portless sector with an empty reserve. Since we can't permanently trap players,
+the game needs a mechanic to to deal with this. Fuel can slowly and ambiently regenerate
+through solar or some other mechanism. Players can also launch a distress beacon,
+which will take time for a "tow" ship to arrive and time for the ship to tow the
+admiral's ship to the nearest port.
+
+**Information.** Being in a pocket whose exit exists but which you have not found
+is a strand that looks exactly like a trap from inside the cockpit. So a density
+scan run from inside a sector always reports that sector's own exits. A lane can
+be hidden from the far end but never from where you're sitting, so long as you have
+the ability to perform density and ether scans.
+
+## Commodities
+
+There are four different commodities, each governed by an inviarant,
+**every commodity must be consumed by something outside trading**. 
+A commodity that exists only to be bought low and sold high is an opaque
+black box. TW2002 got this right: its ore was burned as fuel and its equipment
+was consumed by construction.
+
+Names are deliberately plain. No coined alloys, no borrowed settings from other
+universes or IP.
+
+**Fuel** — consumed by movement. Universal demand and a price base everywhere,
+which makes a sector with no port genuinely dangerous to be caught in. 
+
+**Alloy** — consumed by construction: relay deployment, colony stages,
+starport building, hull repair. Heavy per unit, so hauling it is about hold
+space and volume.
+
+**Provisions** — consumed by colonies and life support. Perishable: it decays
+in the hold over ticks. This is the only commodity whose value depends on how
+_long_ a route takes rather than how far it goes, which is what makes a short
+fast leg mechanically different from a long slow one.
+
+**Colonists** — consumed only by colonies, and produced only by populous core
+and hub ports. It creates a standing flow from the crowded
+core out to the empty periphery, with raw materials flowing back the other way.
+That asymmetry is at the root of the economy. The archetypal first circuit an 
+admiral finds is colonists out, fuel or alloy back.
+
+Each commodity is differentiated on a physical axis, not only on price — mass
+per unit, perishability, and whether anyone but a colony will take it.
+
+### Ports
+
+There are no port classes. TW2002 enumerated eight because it had to fit the
+buy/sell combinations of three commodities into a byte; there is no reason to
+inherit that. A port holds, per commodity, a **stance** (produces, consumes, or
+neither), a **stock**, and a **regeneration rate**.
+
+Price comes off stock. A port that has been drained pays worse until it
+recovers, so a good route wears out under use and has to be rotated. That is
+what stops one admiral farming a single pair forever, and what makes a
+discovered route a renewable asset rather than a solved puzzle.
+
+Roughly a third of sectors have a port at the big bang, weighted so hubs almost
+always do and peripheral sectors rarely do. Players build more later.
+
+### Why distance pays
+
+If price were purely a function of local stock, a pair of ports two jumps apart
+and a pair twenty jumps apart would yield the same margin per unit, nobody would
+run the long lane, and the optimal play would collapse back to TW2002 adjacency
+trading with the trunk network sitting unused.
+
+So each consuming port's base price multiplier for a commodity comes from **its
+hop distance to the nearest producer of that commodity, measured over published
+lanes only**. A port far from any source of what it needs pays well for it, by
+construction.
+
+Measuring over published lanes only is the core of the discovery economy. 
+Prices reflect the distance the public map implies, so an admiral with
+an unpublished shortcut is faster than the market expects and pockets the
+difference.
+
+Which means the multiplier is not a static generation output. It's derived from
+the public map as it currently stands, so when a shortcut gets published the
+consuming port's distance to a producer drops, its multiplier drops, and the
+margin collapses. The advantage decays because the map changed, not because we
+asserted it would. Keeping it current is cheap: one multi-source search per
+commodity over the published lanes, recomputed when the public map changes,
+which is rare.
+
+In other words, if someone publishes a key piece of undiscovered map, it could
+dramatically change prices throughout the entire universe.
+
+## The big bang algorithm
+
+Four passes. Each pass states the invariant it must not break.
+
+### Pass 1 — Skeleton
+
+The skeleton exists to guarantee that every admiral can reach every part of the
+game.
+
+1. **Positions.** Scatter N sector points, spread out rather than clumped. These
+   coordinates drive distance and neighbour selection and are then discarded.
+2. **Core.** Build a small, dense, all-two-way, all-published cluster. It holds
+   the spawn and the special ports and is protected space.
+3. **Hubs and trunk.** Pick a handful of well-separated sectors as hubs and
+   connect them in a loop, splicing the core into it. A loop rather than a line
+   means the highway has no dead end and there are always two ways around a
+   blockade.
+4. **Regions.** Assign every remaining sector to its nearest hub. Inside each
+   region, build a spanning tree rooted at the hub — the tree is what guarantees
+   reachability — then add a few extra intra-region lanes so there is more than
+   one way through.
+
+_Invariant: the graph is connected and entirely two-way at the end of this
+pass._
+
+### Pass 2 — Character
+
+This pass makes the map feel like TW2002 instead of a road atlas.
+
+1. **Degree cap.** Enforce a maximum of six lanes per sector, pruning excess
+   edges and preferring to keep trunk and tree edges. Six is TW2002's cap and it
+   keeps the mesh sparse enough that topology is worth learning.
+2. **One-way conversion.** Walk a subset of non-trunk, non-core lanes and make
+   them one-directional. After each conversion, check that the graph is still
+   strongly connected, and revert the conversion if it is not.
+3. **Pockets.** Carve the prized structures deliberately: take peripheral leaf
+   sectors and give them one unpublished one-way lane in from one neighbour and
+   one unpublished one-way lane out to a different one. Absent from the public
+   map, findable only by scanning the single neighbour that leads in — and, per
+   the scanning rule, always escapable once you are inside.
+4. **Planets.** Place colonisable planets, weighted toward the periphery and
+   heavily toward pockets. A pocket with a planet and no port is the thing
+   players will hunt for: somewhere to build a colony or their own port where
+   nobody will find it.
+
+_Invariant: the graph is strongly connected. Every sector can reach every other
+sector._
+
+No conversion in this pass may produce a trap. See Nobody gets stranded: that is
+a rule about the universe, and it makes this invariant a single clean check
+rather than a check plus an exceptions list.
+
+### Pass 3 — Economy
+
+1. **Stances.** Assign each port its per-commodity stance, biased by position:
+   periphery produces raw materials, core and hubs consume them and produce
+   colonists.
+2. **Planted pairs.** Pick a target number of producer/consumer pairs for the
+   same commodity, separated by a healthy number of jumps. For a fraction of
+   them, ensure the best route between the two runs through an unpublished lane,
+   adding a shortcut if none exists. These are the routes worth discovering.
+3. **Prices.** Compute each consuming port's base multiplier per commodity from
+   its published-lane distance to the nearest producer, as described above.
+   Recompute whenever the public map changes.
+
+_Invariant: at least K planted pairs exist whose shortest published route is
+meaningfully longer than their shortest route including unpublished lanes._
+
+### Pass 4 — Validate, or reseed
+
+Run every invariant. If any fails, do not repair the graph in place — derive a
+new sub-seed and generate again, recording the sub-seed that finally succeeded
+so the result stays reproducible. Repair logic is where subtle, rarely-executed
+bugs live; regeneration is cheap and obviously correct.
+
+Worth asserting:
+
+- The same seed and map version produce an identical universe, byte for byte.
+- The graph is strongly connected.
+- No sector exceeds the lane cap.
+- Hubs exist: some sectors have many lanes, and most have two or three. This is
+  the test that proves the trunk structure actually emerged rather than being
+  hoped for.
+- From any sector, a trunk lane is within a bounded number of jumps.
+- Every pocket has an exit, that exit is not the lane you came in by, and it is
+  discoverable by scanning from inside the pocket.
+- Enough planted pairs route through unpublished lanes.
+
+## Determinism
+
+The generator is a pure function of the seed. Two consequences.
+
+**Never iterate a Go map where the result affects output.** Map iteration order
+is randomised; sort the keys. This is the single easiest way to produce a
+universe that differs between instances, and it will not show up until two
+instances disagree about where a ship can go.
+
+**Record a map version in `UniverseCreated` alongside the seed.** If the map is
+derived rather than stored, any later change to the generator silently moves
+every ship in every running universe. The generator switches on the recorded
+version and old universes keep the geography they were born with. The backend
+design already requires rules versions in events; this is the one that hurts
+most if it is missed.
+
+## Known TODOs
+
+- `avatar.StartingSector` is the string `"0"`, a placeholder for a map that did
+  not exist. Once sectors are real, spawn becomes a choice: a core sector,
+  possibly varied per admiral so the whole player base does not share a
+  starting square.
+- Hub count, region size, one-way lane fraction, pocket count and planted pair
+  count are all tuning parameters with no defensible values yet. They need a
+  universe to look at before they can be set.
+- Whether to expose sector positions for a map view in the web app. The game
+  does not need them and TW2002 managed without, but a visual map is a strong
+  draw and the generator already has the data.
+- **Contraband** as a fifth commodity, high margin and confiscated in the core.
+  Doctrine already references staying clean, which only means something once
+  there is a dirty option. Deliberately deferred: it is a risk axis, and risk
+  axes are only interesting after the ordinary economy works.
+- The chart bounty's value, which is an input that feeds into how fast the public map fills and so how long discovery is important to decision models. Needs a live universe to calibrate against.
+- What being "seen" using a lane actually requires: mere presence in the origin
+  sector, or scanner quality, or a successful scan that tick.
+- Probe cost, range in hops, and loss chance in hostile space.
+- The order latency formula: what a relay hop costs in ticks, and what the final
+  leg from the nearest relay out to the ship costs. Needs real distances before
+  it can be tuned. Whether a lane
+  can be in or out of coverage, and what that does to doctrine delivery mid
+  transit, is undecided.
