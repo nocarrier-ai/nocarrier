@@ -21,11 +21,21 @@ Strict event sourcing terms apply throughout.
 - **Command**: an ephemeral request handled by an aggregate or processor, which
   produces events or a rejection. Commands are never replayed and never part
   of rebuilding state. A rejected command _never_ produces an event.
-- **Aggregate**: the consistency boundary. The **sector** is the main aggregate, the
-  **universe clock** is a second, single-instance aggregate. The **avatar** (a fleet admiral and
-  its flagship) is a third, owning identity and lifecycle; admirals also have their
-  own subjects for doctrine and plans. Each aggregate instance owns exactly one subject,
-  `<kind>.<id>`, and that subject is its consistency boundary.
+- **Aggregate**: the consistency boundary. Each aggregate instance owns exactly one
+  subject, `<kind>.<id>`, and that subject is its consistency boundary. None is
+  special: on every tick the winner fans out one command per aggregate with work,
+  each resolves its own tick over its own state, its events land on its own subject,
+  and projections fold them. The aggregates are:
+  - **universe clock** — single instance; `UniverseCreated`, then `TickAdvanced` forever.
+  - **sector** — who is present, movement, combat. One `TickResolved` per sector-tick.
+  - **port** — the trading post's books: `available` per commodity, and every trade.
+    Stances, capacity and regeneration are facts in the universe map, not events.
+  - **ship** — the hull: position, cargo, condition. (planned)
+  - **planet** — colonies and what is on the surface. (planned, phase 3)
+  - **avatar** — the fleet admiral: identity and lifecycle, with doctrine and plan on
+    their own subjects.
+  Cross-aggregate effects are never a second write. A trade is one event on the
+  port; the ship's cargo and credits are projections of it.
 - **Projection**: a fold over event streams into a read model (KV bucket). Every read
   model must be rebuildable by replay from the streams.
 - **Intent**: The output of a decision model pipeline and an element of an avatar's plan. An action the avatar intends to
@@ -52,11 +62,16 @@ Every tick (default 60s, never smaller than 30s, fixed in the "big bang" event):
    nothing else — never of where the ship is. Free-tier avatars hold less relay
    bandwidth, so they both consult less often and wait longer for new orders; their
    plans keep executing regardless.
-3. **Execute**: every active sector resolves once. The resolver consumes the
+3. **Execute**: every aggregate with work resolves once — sectors, ports, and
+   later ships and planets, each from its own command. A sector consumes the
    next intent of each local avatar's plan (or falls back to deterministic
    doctrine standing orders on an empty plan), delivers doctrine whose relay
-   delay has elapsed, applies simultaneous movement/combat/trade rules, and
-   appends exactly one `TickResolved` event for the sector and tick.
+   delay has elapsed, applies simultaneous movement and combat rules, and
+   appends exactly one `TickResolved` event for the sector and tick. A port
+   resolves the trades of ships present against its own stock. A plan is a
+   sequence of intents consumed one per tick, so an arrival at T and a trade
+   at T+1 need no ordering between aggregates: the port reads a read model
+   that already folded the arrival.
 
 The loop is self-sustaining with zero player input and zero decisions. Plans
 drain, `TickResolved` keeps sectors active until nothing is pending, and idle
@@ -174,6 +189,9 @@ Event streams (file storage, S2 compression where large, AllowDirect):
 
 - `CLOCK`     clock.universe          UniverseCreated, TickAdvanced
 - `EVENTS`    sector.<sector_id>      one TickResolved per sector-tick
+              port.<sector_id>        TradeExecuted (planned; one port per sector)
+              ship.<ship_id>          (planned)
+              planet.<planet_id>      (planned, phase 3)
               avatar.<avatar_id>      AdmiralCommissioned, later lifecycle
               plan.<avatar_id>        PlanRevised
               doctrine.<avatar_id>    DoctrineUpdated

@@ -2,11 +2,14 @@
 
 The universe is created once, at the _big bang_, and never regenerated. It is a
 graph of numbered **sectors** joined by directed **lanes**, with **ports** that
-produce and consume a handful of commodities. The parts of the universe
-described in this document are derived deterministically from the seed 
-recorded in the `UniverseCreated` event, so the
-map is not stored as events nor is it stored in a bucket. Any instance can
-recompute it, and every instance computes the same one.
+produce and consume a handful of commodities.
+
+Generation is a pure function of a seed, run **once**. Its output is stored in
+the `universe` KV bucket with `encoding/gob`, then read by every instance at
+startup. The map is not recomputed per process: generation is pure so that it is
+reproducible for tests and bug reports, not so that it can be repeated in
+production. The seed stays in the `UniverseCreated` event, which must agree with
+the stored map or an instance refuses to start.
 
 This is a modernized TradeWars 2002 universe. The original included numbered sectors, 
 a sparse mesh of space lanes, a hard cap on lanes per sector, one-way lanes as 
@@ -19,14 +22,26 @@ discovered.
 
 ## Vocabulary
 
+Most of these words describe how the generator builds the map, not what the
+map records. The stored universe holds only what is true in the world and never
+changes: sectors, which of them are protected space, the lanes between them,
+where the ports are, and which lanes were public at the moment of creation. Hub, trunk, region and pocket are not labels on
+anything — a player finds a pocket by its shape and learns the highway by its
+traffic, and a flag saying "pocket" would hand over the thing they are meant to
+discover.
+
 - **Sector**: a node. Identified by a positive integer. Sectors have no
-  player-visible coordinates; position exists only inside the generator, to
-  decide which sectors are plausibly near each other.
+  coordinates, not even inside the generator. The only distance in this
+  universe is hops — how many lanes lie between two sectors — and the generator
+  reasons in nothing else.
 - **Lane**: a directed edge between two sectors. A two-way lane is two lane
-  records. A lane carries geometry only — its length, which the ship turns into
-  fuel burn and transit time. Whether a lane is published is a property of the 
-  lane. Every admiral sees the universe as a combination of public and published
-  lane maps as well as the ones they've discovered on their own.
+  records. A lane has no length and no capacity: this is a graph, not Euclidean
+  space, so a warp is a warp and distance between sectors is a count of hops.
+  Whether a lane is public is not a property of the lane, because it changes
+  over time: the map records which lanes were public at the big bang, and the
+  public map as it stands now is a projection seeded from that and folding
+  every publication since. Every admiral sees the universe as the public map
+  plus the lanes they have discovered on their own.
 - **Core**: a small, densely connected, fully two-way, fully published cluster
   containing the spawn area and the special ports. Protected space.
 - **Hub**: one of a small number of well-separated sectors that anchor the
@@ -39,7 +54,7 @@ discovered.
   unpublished. The prize.
 - **Pocket**: a sector reached by one one-way lane in, leaving by a one-way lane
   to somewhere else, neither published. Concealed, never a trap.
-- **Published**: in the public map, which every admiral can see and which market
+- **Published**: in the current public map, which every admiral can see and which market
   prices are computed from. Unpublished lanes work the same as published, only varying based on how admirals become aware of it.
 - **Known**: whether one particular admiral has discovered a lane. Per-avatar,
   held in a read model, and never a field on the lane.
@@ -429,14 +444,32 @@ Worth asserting:
 
 ## Determinism
 
-The generator is a pure function of the seed. Two consequences.
+Generation is a pure function of the seed, and the map is stored rather than
+recomputed, so determinism is a convenience rather than a correctness
+requirement. It is still worth keeping: a seed in a bug report should reproduce
+the universe that caused it.
+
+**No coordinates, no floating point, anywhere in generation.** Warp lanes
+exist precisely because there is no x and y; TW2002 had none and neither does
+this. Everything the generator decides — which sectors a region tree joins,
+where an extra lane goes, where a pocket exits — is a choice among nodes and
+edges, made with the seeded generator and bounded by hop counts. There is
+nothing to measure.
 
 **Never iterate a Go map where the result affects output.** Map iteration order
-is randomised; sort the keys. This is the single easiest way to produce a
-universe that differs between instances, and it will not show up until two
-instances disagree about where a ship can go.
+is randomised; sort the keys.
 
-**Record a map version in `UniverseCreated` alongside the seed.** If the map is
+**OBSOLETE, kept to record the decision: record a map version in
+`UniverseCreated` alongside the seed.** This was the plan while the map was
+derived on every startup. Storing the map removes the problem entirely: a
+changed generator cannot disturb a universe that already exists, because nothing
+regenerates it. The map carries a generator version as provenance. The encoding
+is `gob`, chosen over a bespoke format because a field added for a later pass —
+port economies, planets — decodes as its zero value on a map stored before it
+existed, so an existing universe keeps loading without a reader per format
+version.
+
+The original reasoning, for the record: if the map is
 derived rather than stored, any later change to the generator silently moves
 every ship in every running universe. The generator switches on the recorded
 version and old universes keep the geography they were born with. The backend

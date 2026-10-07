@@ -13,7 +13,7 @@ import (
 )
 
 func testConfig(period time.Duration) config {
-	return config{replicas: 1, tickPeriod: period}
+	return config{replicas: 1, tickPeriod: period, sectors: 64}
 }
 
 func clockEvents(t *testing.T, js jetstream.JetStream) uint64 {
@@ -25,7 +25,7 @@ func TestEnsureUniverseCreatesOnce(t *testing.T) {
 	js := natstest.Start(t)
 	ctx := natstest.Context(t)
 
-	first, err := ensureUniverse(ctx, js, testConfig(time.Minute), natstest.Logger())
+	first, _, err := ensureUniverse(ctx, js, testConfig(time.Minute), natstest.Logger())
 	if err != nil {
 		t.Fatalf("first: %v", err)
 	}
@@ -33,7 +33,7 @@ func TestEnsureUniverseCreatesOnce(t *testing.T) {
 		t.Errorf("created %+v", first)
 	}
 
-	second, err := ensureUniverse(ctx, js, testConfig(2*time.Minute), natstest.Logger())
+	second, _, err := ensureUniverse(ctx, js, testConfig(2*time.Minute), natstest.Logger())
 	if err != nil {
 		t.Fatalf("second: %v", err)
 	}
@@ -55,7 +55,7 @@ func TestEnsureUniverseConcurrentInstancesAgree(t *testing.T) {
 	var wg sync.WaitGroup
 	for i := range instances {
 		wg.Go(func() {
-			got[i], errs[i] = ensureUniverse(ctx, js, testConfig(time.Minute), natstest.Logger())
+			got[i], _, errs[i] = ensureUniverse(ctx, js, testConfig(time.Minute), natstest.Logger())
 		})
 	}
 	wg.Wait()
@@ -80,7 +80,7 @@ func TestEnsureUniverseRejectsForeignFirstEvent(t *testing.T) {
 		t.Fatalf("seed clock: %v", err)
 	}
 
-	if _, err := ensureUniverse(ctx, js, testConfig(time.Minute), natstest.Logger()); err == nil {
+	if _, _, err := ensureUniverse(ctx, js, testConfig(time.Minute), natstest.Logger()); err == nil {
 		t.Fatal("accepted a clock whose first event is not UniverseCreated")
 	}
 }

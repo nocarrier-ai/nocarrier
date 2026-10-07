@@ -35,6 +35,7 @@ import (
 	"github.com/nocarrier-ai/nocarrier/internal/sector"
 	"github.com/nocarrier-ai/nocarrier/internal/service"
 	"github.com/nocarrier-ai/nocarrier/internal/streams"
+	"github.com/nocarrier-ai/nocarrier/internal/universe"
 )
 
 func main() {
@@ -86,11 +87,13 @@ func run() error {
 		return fmt.Errorf("jetstream: %w", err)
 	}
 
-	universe, err := ensureUniverse(ctx, js, cfg, log)
+	bigBang, sectorMap, err := ensureUniverse(ctx, js, cfg, log)
 	if err != nil {
 		return err
 	}
-	log.Info("universe", "tick_period", universe.TickPeriod.String())
+	log.Info("universe", "tick_period", bigBang.TickPeriod.String(),
+		"sectors", sectorMap.Count(), "lanes", len(sectorMap.Lanes),
+		"ports", len(sectorMap.Ports), "spawn", sectorMap.Spawn)
 
 	active, err := projector.NewActiveSectors(ctx, js, log)
 	if err != nil {
@@ -109,7 +112,7 @@ func run() error {
 		return err
 	}
 	dispatcher := dispatch.New(js, active, dueAvatars, log)
-	pacer, err := clock.NewPacer(js, log, cfg.instanceID, universe.TickPeriod, dispatcher)
+	pacer, err := clock.NewPacer(js, log, cfg.instanceID, bigBang.TickPeriod, dispatcher)
 	if err != nil {
 		return err
 	}
@@ -134,35 +137,82 @@ func run() error {
 	return loop.Supervise(ctx, log, loops...)
 }
 
-// ensureUniverse creates streams and buckets, and appends UniverseCreated if
-// the CLOCK stream is empty. The guarded first append means concurrent
-// instances race safely: one wins, the rest read the winner's event.
-func ensureUniverse(ctx context.Context, js jetstream.JetStream, cfg config, log *slog.Logger) (clock.UniverseCreated, error) {
-	if err := streams.Ensure(ctx, js, cfg.replicas, cfg.tickPeriod); err != nil {
-		return clock.UniverseCreated{}, fmt.Errorf("ensure streams: %w", err)
+// ensureUniverse brings the universe into being, or finds the one that already
+// exists. Two things have to be created exactly once: the sector map and the
+// UniverseCreated event.
+//
+// The map goes first. Its KV create is the election — concurrent instances all
+// generate a candidate, exactly one lands, and the losers read the winner's
+// rather than their own. Only then is UniverseCreated appended, carrying the
+// seed of a map that is already durable, so there is never a moment where the
+// clock says a universe exists but its geography does not.
+func ensureUniverse(ctx context.Context, js jetstream.JetStream, cfg config, log *slog.Logger) (clock.UniverseCreated, *universe.Universe, error) {
+	fail := func(err error) (clock.UniverseCreated, *universe.Universe, error) {
+		return clock.UniverseCreated{}, nil, err
 	}
-	u := clock.UniverseCreated{Type: "UniverseCreated", TickPeriod: cfg.tickPeriod, Seed: time.Now().UnixNano()}
-	_, err := streams.Append(ctx, js, streams.SubjectClock, u, 0)
+	if err := streams.Ensure(ctx, js, cfg.replicas, cfg.tickPeriod); err != nil {
+		return fail(fmt.Errorf("ensure streams: %w", err))
+	}
+	store, err := universe.NewStore(ctx, js)
+	if err != nil {
+		return fail(err)
+	}
+
+	stored, err := store.Load(ctx)
 	switch {
 	case err == nil:
-		log.Info("universe created")
-		return u, nil
+	case errors.Is(err, universe.ErrNoMap):
+		candidate, gerr := universe.Generate(time.Now().UnixNano(), cfg.sectors)
+		if gerr != nil {
+			return fail(fmt.Errorf("generate universe: %w", gerr))
+		}
+		switch cerr := store.Create(ctx, candidate); {
+		case cerr == nil:
+			log.Info("universe map created", "sectors", candidate.Count(),
+				"lanes", len(candidate.Lanes), "ports", len(candidate.Ports),
+				"map_version", candidate.Version)
+			stored = candidate
+		case errors.Is(cerr, universe.ErrMapExists):
+			// Another instance won the big bang; its map is the real one.
+			if stored, err = store.Load(ctx); err != nil {
+				return fail(fmt.Errorf("read the winning universe map: %w", err))
+			}
+		default:
+			return fail(cerr)
+		}
+	default:
+		return fail(err)
+	}
+
+	u := clock.UniverseCreated{Type: "UniverseCreated", TickPeriod: cfg.tickPeriod, Seed: stored.Seed}
+	_, err = streams.Append(ctx, js, streams.SubjectClock, u, 0)
+	switch {
+	case err == nil:
+		log.Info("universe created", "seed", u.Seed)
+		return u, stored, nil
 	case !errors.Is(err, streams.ErrConflict):
-		return clock.UniverseCreated{}, fmt.Errorf("create universe: %w", err)
+		return fail(fmt.Errorf("create universe: %w", err))
 	}
 	s, err := js.Stream(ctx, streams.StreamClock)
 	if err != nil {
-		return clock.UniverseCreated{}, err
+		return fail(err)
 	}
 	first, err := s.GetMsg(ctx, 1)
 	if err != nil {
-		return clock.UniverseCreated{}, fmt.Errorf("read UniverseCreated: %w", err)
+		return fail(fmt.Errorf("read UniverseCreated: %w", err))
 	}
 	var existing clock.UniverseCreated
 	if err := json.Unmarshal(first.Data, &existing); err != nil || existing.Type != "UniverseCreated" {
-		return clock.UniverseCreated{}, errors.New("first clock event is not UniverseCreated")
+		return fail(errors.New("first clock event is not UniverseCreated"))
 	}
-	return existing, nil
+	// The clock and the map must agree about which universe this is. A
+	// mismatch means one of them was wiped independently, and starting anyway
+	// would move every ship.
+	if existing.Seed != stored.Seed {
+		return fail(fmt.Errorf("clock says universe seed %d but the stored map is seed %d",
+			existing.Seed, stored.Seed))
+	}
+	return existing, stored, nil
 }
 
 func startHealth(addr string, nc *nats.Conn, log *slog.Logger) *http.Server {
@@ -196,6 +246,7 @@ type config struct {
 	executeWorkers int
 	decideWorkers  int
 	jevURL         string
+	sectors        int
 	httpAddr       string
 	logLevel       string
 	instanceID     string
@@ -214,6 +265,7 @@ func loadConfig() (config, error) {
 		decideWorkers:  32,
 		replicas:       1,
 		tickPeriod:     time.Minute,
+		sectors:        1000,
 	}
 	var err error
 	if c.embeddedNATS, err = envBool("NOCARRIER_EMBEDDED_NATS", false); err != nil {
@@ -226,6 +278,9 @@ func loadConfig() (config, error) {
 		return c, err
 	}
 	if c.decideWorkers, err = envInt("NOCARRIER_DECIDE_WORKERS", c.decideWorkers); err != nil {
+		return c, err
+	}
+	if c.sectors, err = envInt("NOCARRIER_SECTORS", c.sectors); err != nil {
 		return c, err
 	}
 	if c.tickPeriod, err = envDuration("NOCARRIER_TICK_PERIOD", c.tickPeriod); err != nil {

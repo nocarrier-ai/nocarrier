@@ -29,6 +29,10 @@ const (
 	BucketAvatarStatus = "avatar-status"
 	BucketLeaderboards = "leaderboards"
 	BucketDoctrine     = "doctrine"
+	// BucketUniverse holds the one packed sector map, written once at the big
+	// bang. Binary rather than JSON keeps even a very large universe inside
+	// the default max payload, so a plain KV value does the job.
+	BucketUniverse = "universe"
 )
 
 var validID = regexp.MustCompile(`^[A-Za-z0-9_-]+$`)
@@ -104,7 +108,7 @@ func Ensure(ctx context.Context, js jetstream.JetStream, replicas int, tickPerio
 			return fmt.Errorf("stream %s: %w", cfg.Name, err)
 		}
 	}
-	for _, b := range []string{BucketSectorState, BucketActive, BucketDue, BucketAvatarStatus, BucketLeaderboards, BucketDoctrine} {
+	for _, b := range []string{BucketSectorState, BucketActive, BucketDue, BucketAvatarStatus, BucketLeaderboards, BucketDoctrine, BucketUniverse} {
 		cfg := jetstream.KeyValueConfig{Bucket: b, Storage: jetstream.FileStorage, Replicas: replicas}
 		if _, err := js.CreateOrUpdateKeyValue(ctx, cfg); err != nil {
 			return fmt.Errorf("bucket %s: %w", b, err)
