@@ -281,50 +281,44 @@ the ability to perform density and ether scans.
 
 ## Commodities
 
-There are four different commodities, each governed by an inviarant,
-**every commodity must be consumed by something outside trading**. 
-A commodity that exists only to be bought low and sold high is an opaque
-black box. TW2002 got this right: its ore was burned as fuel and its equipment
-was consumed by construction.
+Three, TW2002's own: **Fuel Ore**, **Organics**, **Equipment**. Colonists are
+not a commodity; they move between planets and arrive in phase 3.
 
-Names are deliberately plain. No coined alloys, no borrowed settings from other
-universes or IP.
-
-**Fuel** — consumed by movement. Universal demand and a price base everywhere,
-which makes a sector with no port genuinely dangerous to be caught in. 
-
-**Alloy** — consumed by construction: relay deployment, colony stages,
-starport building, hull repair. Heavy per unit, so hauling it is about hold
-space and volume.
-
-**Provisions** — consumed by colonies and life support. Perishable: it decays
-in the hold over ticks. This is the only commodity whose value depends on how
-_long_ a route takes rather than how far it goes, which is what makes a short
-fast leg mechanically different from a long slow one.
-
-**Colonists** — consumed only by colonies, and produced only by populous core
-and hub ports. It creates a standing flow from the crowded
-core out to the empty periphery, with raw materials flowing back the other way.
-That asymmetry is at the root of the economy. The archetypal first circuit an 
-admiral finds is colonists out, fuel or alloy back.
-
-Each commodity is differentiated on a physical axis, not only on price — mass
-per unit, perishability, and whether anyone but a colony will take it.
+There are no sinks yet. Ports consume nothing themselves and ships do not burn
+anything to move — TW2002 budgeted movement as turns, and Fuel Ore was not used
+up until players built on planets. At this step the economy is TW2002's: ports
+buy and sell, admirals haul between them. Sinks come with planets.
 
 ### Ports
 
-There are no port classes. TW2002 enumerated eight because it had to fit the
-buy/sell combinations of three commodities into a byte; there is no reason to
-inherit that. A port holds, per commodity, a **stance** (produces, consumes, or
-neither), a **stock**, and a **regeneration rate**.
+The port is an aggregate. It owns its books, a trade is one event on it, and a
+ship's cargo and credits are projections of that event.
 
-Price comes off stock. A port that has been drained pays worse until it
-recovers, so a good route wears out under use and has to be rotated. That is
-what stops one admiral farming a single pair forever, and what makes a
-discovered route a renewable asset rather than a solved puzzle.
+Every ordinary port trades all three commodities, as TW2002's eight port classes
+did. Per commodity it holds three fixed facts in the universe map:
+
+1. **Stance** — buys or sells.
+2. **Capacity** — TW2002's `max`.
+3. **Regen** — a fraction of capacity per tick, always toward capacity.
+
+And one runtime number, on the port aggregate, not in the map: **available** —
+goods on hand for a seller, demand remaining for a buyer. Starts at capacity,
+every trade reduces it, every tick regenerates it. The idle universe is every
+port at max, which is maximum opportunity; trade is what depletes it.
+
+Price is derived, never stored. The local factor is percent-of-max: a seller
+gets dearer as it drains, a buyer pays less as it fills. The distance factor is
+below.
+
+Stances are biased by tree depth from the hub, probabilistically: deep sectors
+lean toward selling Fuel Ore and Organics and buying Equipment; hubs, core and
+shallow sectors lean the reverse. All eight classes appear, with a gradient
+underneath. The gradient makes a long haul pay; the randomness keeps it from
+being two port types.
 
 Roughly a third of sectors have a port at the big bang, weighted so hubs almost
-always do and peripheral sectors rarely do. Players build more later.
+always do and pockets rarely do. The spawn always has one. Players build more
+later.
 
 ### Why distance pays
 
@@ -333,9 +327,9 @@ and a pair twenty jumps apart would yield the same margin per unit, nobody would
 run the long lane, and the optimal play would collapse back to TW2002 adjacency
 trading with the trunk network sitting unused.
 
-So each consuming port's base price multiplier for a commodity comes from **its
-hop distance to the nearest producer of that commodity, measured over published
-lanes only**. A port far from any source of what it needs pays well for it, by
+So each buying port's base price multiplier for a commodity comes from **its hop
+distance to the nearest seller of that commodity, measured over the current
+public map**. A port far from any source of what it needs pays well for it, by
 construction.
 
 Measuring over published lanes only is the core of the discovery economy. 
@@ -363,18 +357,15 @@ Four passes. Each pass states the invariant it must not break.
 The skeleton exists to guarantee that every admiral can reach every part of the
 game.
 
-1. **Positions.** Scatter N sector points, spread out rather than clumped. These
-   coordinates drive distance and neighbour selection and are then discarded.
-2. **Core.** Build a small, dense, all-two-way, all-published cluster. It holds
-   the spawn and the special ports and is protected space.
-3. **Hubs and trunk.** Pick a handful of well-separated sectors as hubs and
-   connect them in a loop, splicing the core into it. A loop rather than a line
-   means the highway has no dead end and there are always two ways around a
-   blockade.
-4. **Regions.** Assign every remaining sector to its nearest hub. Inside each
-   region, build a spanning tree rooted at the hub — the tree is what guarantees
-   reachability — then add a few extra intra-region lanes so there is more than
-   one way through.
+1. **Core.** The first sectors by ID form a small, dense, all-two-way,
+   all-published cluster holding the spawn. Protected space.
+2. **Hubs and trunk.** The next sectors are hubs, joined in a loop with the core
+   spliced in. A loop rather than a line means the highway has no dead end and
+   there are always two ways around a blockade.
+3. **Regions.** The remaining sectors are dealt to the hubs in runs. Each region
+   grows a tree from its hub — the tree guarantees reachability — bounded in
+   degree and depth, then gains extra lanes joining sectors a few tree hops apart
+   so there is more than one way through.
 
 _Invariant: the graph is connected and entirely two-way at the end of this
 pass._
@@ -383,9 +374,8 @@ pass._
 
 This pass makes the map feel like TW2002 instead of a road atlas.
 
-1. **Degree cap.** Enforce a maximum of six lanes per sector, pruning excess
-   edges and preferring to keep trunk and tree edges. Six is TW2002's cap and it
-   keeps the mesh sparse enough that topology is worth learning.
+1. **Degree cap.** No sector exceeds six lanes, TW2002's cap. Every pass checks
+   before adding; nothing is pruned after.
 2. **One-way conversion.** Walk a subset of non-trunk, non-core lanes and make
    them one-directional. After each conversion, check that the graph is still
    strongly connected, and revert the conversion if it is not.
@@ -408,19 +398,16 @@ rather than a check plus an exceptions list.
 
 ### Pass 3 — Economy
 
-1. **Stances.** Assign each port its per-commodity stance, biased by position:
-   periphery produces raw materials, core and hubs consume them and produce
-   colonists.
-2. **Planted pairs.** Pick a target number of producer/consumer pairs for the
-   same commodity, separated by a healthy number of jumps. For a fraction of
-   them, ensure the best route between the two runs through an unpublished lane,
-   adding a shortcut if none exists. These are the routes worth discovering.
-3. **Prices.** Compute each consuming port's base multiplier per commodity from
-   its published-lane distance to the nearest producer, as described above.
-   Recompute whenever the public map changes.
+1. **Stances.** Roll each port's stance, capacity and regen per commodity,
+   biased by tree depth as described under Ports.
+2. **Shortcuts.** Pick a seller and a buyer of the same commodity at least
+   `minPairHops` apart over the public map, and add an unpublished two-way lane
+   between a sector near each. These are the routes worth discovering.
+3. **Prices** are not generated. They are derived at runtime from available and
+   the current public map.
 
-_Invariant: at least K planted pairs exist whose shortest published route is
-meaningfully longer than their shortest route including unpublished lanes._
+_Invariant: at least K seller-to-buyer routes are shorter over all lanes than
+over public lanes by `shortcutGain` hops or more._
 
 ### Pass 4 — Validate, or reseed
 

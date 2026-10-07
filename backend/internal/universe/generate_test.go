@@ -308,3 +308,87 @@ func TestAccessorsOutOfRange(t *testing.T) {
 		t.Errorf("Count = %d, want %d", u.Count(), len(u.Sectors))
 	}
 }
+
+// Every port trades all three commodities with capacity in range and regen set.
+func TestPortsTradeAllThreeCommodities(t *testing.T) {
+	for _, u := range testUniverses(t) {
+		for _, p := range u.Ports {
+			for c, g := range p.Goods {
+				if g.Capacity < capacityMin || g.Capacity > capacityMax {
+					t.Errorf("%s: port %d commodity %d capacity %d", name(u), p.Sector, c, g.Capacity)
+				}
+				if g.Regen < 1 {
+					t.Errorf("%s: port %d commodity %d regen %d", name(u), p.Sector, c, g.Regen)
+				}
+			}
+		}
+	}
+}
+
+// All eight buy/sell classes appear in a large universe.
+func TestAllPortClassesAppear(t *testing.T) {
+	u, err := Generate(1, 1000)
+	if err != nil {
+		t.Fatal(err)
+	}
+	seen := map[[3]bool]bool{}
+	for _, p := range u.Ports {
+		seen[[3]bool{p.Goods[FuelOre].Sells, p.Goods[Organics].Sells, p.Goods[Equipment].Sells}] = true
+	}
+	if len(seen) != 8 {
+		t.Errorf("%d of 8 port classes present", len(seen))
+	}
+}
+
+// Fuel Ore sellers sit farther from the spawn than buyers on average, and
+// Equipment the reverse.
+func TestStancesLeanWithDistanceFromCore(t *testing.T) {
+	u, err := Generate(1, 1000)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dist := hopsFromAny(u.adjacency().out, []int{u.Spawn - 1})
+	mean := func(c Commodity, sells bool) float64 {
+		sum, n := 0, 0
+		for _, p := range u.Ports {
+			if p.Goods[c].Sells == sells {
+				sum += dist[p.Sector-1]
+				n++
+			}
+		}
+		return float64(sum) / float64(n)
+	}
+	if mean(FuelOre, true) <= mean(FuelOre, false) {
+		t.Errorf("Fuel Ore sellers at %.1f hops, buyers at %.1f", mean(FuelOre, true), mean(FuelOre, false))
+	}
+	if mean(Equipment, true) >= mean(Equipment, false) {
+		t.Errorf("Equipment sellers at %.1f hops, buyers at %.1f", mean(Equipment, true), mean(Equipment, false))
+	}
+}
+
+// plantShortcuts adds unpublished lanes.
+func TestPlantShortcutsAddsLanes(t *testing.T) {
+	b := newBuilder(3, 0, 1000)
+	b.buildCore()
+	b.buildTrunk()
+	b.buildRegions()
+	b.convertOneWay()
+	b.carvePockets()
+	b.placePorts()
+	b.assignStances()
+	before := len(b.lanes)
+	b.plantShortcuts()
+	added := 0
+	for _, l := range b.lanes[before:] {
+		if l.published {
+			t.Errorf("shortcut %d->%d is published", l.from, l.to)
+		}
+		added++
+	}
+	if added == 0 {
+		t.Fatal("no shortcuts planted")
+	}
+	if !b.sound() {
+		t.Fatal("shortcuts broke soundness")
+	}
+}

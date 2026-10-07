@@ -68,7 +68,9 @@ func TestValidateRejects(t *testing.T) {
 		"two ports in one sector": func(u *Universe) {
 			u.Ports = append(u.Ports, Port{Sector: u.Ports[0].Sector})
 		},
-		"no ports at all": func(u *Universe) { u.Ports = nil },
+		"no ports at all":         func(u *Universe) { u.Ports = nil },
+		"port with zero capacity": func(u *Universe) { u.Ports[0].Goods[FuelOre].Capacity = 0 },
+		"port with zero regen":    func(u *Universe) { u.Ports[0].Goods[Organics].Regen = 0 },
 	}
 	for label, change := range cases {
 		t.Run(label, func(t *testing.T) {

@@ -81,3 +81,12 @@ func (u *Universe) adjacency() *graph {
 	}
 	return g
 }
+
+// publicAdjacency builds the graph of the lanes public at creation.
+func (u *Universe) publicAdjacency() *graph {
+	g := newGraph(len(u.Sectors))
+	for _, l := range u.PublicAtBigBang {
+		g.add(l.From-1, l.To-1)
+	}
+	return g
+}

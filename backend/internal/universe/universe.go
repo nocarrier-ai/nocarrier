@@ -29,10 +29,28 @@ type Lane struct {
 	To   int
 }
 
-// Port is a trading post. Stances, capacity and regeneration come with the
-// economy pass.
+// Commodity indexes a port's Goods.
+type Commodity uint8
+
+const (
+	FuelOre Commodity = iota
+	Organics
+	Equipment
+	commodityCount
+)
+
+// Good is a port's terms for one commodity. Stock is runtime state on the
+// port aggregate, not here.
+type Good struct {
+	Sells    bool // sells to ships; otherwise buys from them
+	Capacity int  // TW2002's max
+	Regen    int  // per tick, toward Capacity
+}
+
+// Port is a trading post. Every port trades all three commodities.
 type Port struct {
 	Sector int
+	Goods  [commodityCount]Good
 }
 
 // Universe is the generated map. Lanes and PublicAtBigBang are sorted by

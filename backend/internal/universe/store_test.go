@@ -192,7 +192,11 @@ func chainUniverse(n int) *Universe {
 	}
 	slices.SortFunc(u.Lanes, cmpLane)
 	u.PublicAtBigBang = slices.Clone(u.Lanes)
-	u.Ports = []Port{{Sector: 1}, {Sector: 2}}
+	var goods [commodityCount]Good
+	for c := range goods {
+		goods[c] = Good{Sells: true, Capacity: 1000, Regen: 5}
+	}
+	u.Ports = []Port{{Sector: 1, Goods: goods}, {Sector: 2, Goods: goods}}
 	u.index()
 	return u
 }

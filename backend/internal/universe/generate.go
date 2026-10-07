@@ -39,6 +39,21 @@ func extraRegionalLanes(n int) int { return max(2, n/hubCount(n)/2) }
 
 func pocketCount(n int) int { return max(1, n/100) }
 
+// Economy knobs.
+const (
+	capacityMin  = 1000
+	capacityMax  = 5000
+	regenDivisor = 200 // regen = capacity / regenDivisor per tick
+	sellRawBase  = 25  // percent chance a depth-0 port sells Fuel Ore or Organics
+	sellRawSlope = 60  // added at full tree depth
+	minPairHops  = 8   // a planted seller/buyer pair is at least this far apart
+	shortcutGain = 3   // hops an unpublished route must save to count
+)
+
+// shortcutCount is how many trade routes must be shortened by unpublished
+// lanes.
+func shortcutCount(n int) int { return max(2, n/100) }
+
 // Generate builds a universe of sectors for seed. Deterministic. A bad result
 // is reseeded, not repaired.
 func Generate(seed int64, sectors int) (*Universe, error) {
@@ -82,6 +97,7 @@ const (
 	laneCore
 	laneTrunk
 	lanePocket
+	laneShortcut
 )
 
 func newRNG(seed int64, attempt int) *rand.Rand {
@@ -102,21 +118,29 @@ type builder struct {
 	rng *rand.Rand
 	n   int
 
-	kind []sectorKind
-	core []int
-	hubs []int
+	kind  []sectorKind
+	depth []int // tree hops from the region's hub; 0 for core and hubs
+	core  []int
+	hubs  []int
 
 	lanes   []workLane
 	hasPort []bool
+	goods   [][commodityCount]Good
 }
 
-func generate(seed int64, attempt, n int) *Universe {
-	b := &builder{
+func newBuilder(seed int64, attempt, n int) *builder {
+	return &builder{
 		rng:     newRNG(seed, attempt),
 		n:       n,
 		kind:    make([]sectorKind, n),
+		depth:   make([]int, n),
 		hasPort: make([]bool, n),
+		goods:   make([][commodityCount]Good, n),
 	}
+}
+
+func generate(seed int64, attempt, n int) *Universe {
+	b := newBuilder(seed, attempt, n)
 
 	b.buildCore()
 	b.buildTrunk()
@@ -125,6 +149,8 @@ func generate(seed int64, attempt, n int) *Universe {
 	b.convertOneWay()
 	b.carvePockets()
 	b.placePorts()
+	b.assignStances()
+	b.plantShortcuts()
 
 	// Every mutating pass checks sound; asserted once more on the final set.
 	if !b.sound() {
@@ -196,12 +222,11 @@ func (b *builder) buildRegions() {
 // depth bounds, then adds the region's extra lanes a few tree hops apart.
 func (b *builder) growTree(hub int, members []int) {
 	inTree := []int{hub}
-	depth := make([]int, b.n)
 	treeAdj := make([][]int, b.n)
 	for _, m := range members {
 		var admissible []int
 		for _, t := range inTree {
-			if b.degreeOf(t) < laneCap-2 && depth[t] < treeDepthBound {
+			if b.degreeOf(t) < laneCap-2 && b.depth[t] < treeDepthBound {
 				admissible = append(admissible, t)
 			}
 		}
@@ -210,7 +235,7 @@ func (b *builder) growTree(hub int, members []int) {
 		}
 		parent := admissible[b.rng.IntN(len(admissible))]
 		b.addTwoWay(parent, m, laneRegional, b.publishRegional())
-		depth[m] = depth[parent] + 1
+		b.depth[m] = b.depth[parent] + 1
 		treeAdj[parent] = append(treeAdj[parent], m)
 		treeAdj[m] = append(treeAdj[m], parent)
 		inTree = append(inTree, m)
@@ -379,6 +404,102 @@ func (b *builder) placePorts() {
 	}
 }
 
+// assignStances rolls each port's terms per commodity. Deeper sectors lean
+// toward selling Fuel Ore and Organics and buying Equipment; hubs and the core
+// lean the other way.
+func (b *builder) assignStances() {
+	for i := range b.n {
+		if !b.hasPort[i] {
+			continue
+		}
+		raw := sellRawBase + sellRawSlope*b.depth[i]/treeDepthBound
+		for c := range commodityCount {
+			pct := raw
+			if c == Equipment {
+				pct = 100 - raw
+			}
+			capacity := capacityMin + b.rng.IntN(capacityMax-capacityMin+1)
+			b.goods[i][c] = Good{
+				Sells:    b.rng.IntN(100) < pct,
+				Capacity: capacity,
+				Regen:    max(1, capacity/regenDivisor),
+			}
+		}
+	}
+}
+
+// plantShortcuts adds unpublished lanes that shorten the route between a
+// seller and a distant buyer of the same commodity.
+func (b *builder) plantShortcuts() {
+	public := b.publicGraph()
+	want := shortcutCount(b.n)
+	planted := 0
+	for attempt := 0; attempt < want*20 && planted < want; attempt++ {
+		c := Commodity(b.rng.IntN(int(commodityCount)))
+		var sellers, buyers []int
+		for i := range b.n {
+			if !b.hasPort[i] {
+				continue
+			}
+			if b.goods[i][c].Sells {
+				sellers = append(sellers, i)
+			} else {
+				buyers = append(buyers, i)
+			}
+		}
+		if len(sellers) == 0 || len(buyers) == 0 {
+			continue
+		}
+		s := sellers[b.rng.IntN(len(sellers))]
+		t := buyers[b.rng.IntN(len(buyers))]
+		if d := hopsFromAny(public.out, []int{s})[t]; d != -1 && d < minPairHops {
+			continue
+		}
+		all := b.graph()
+		a := b.pick(b.nearby(all, s))
+		z := b.pick(b.nearby(all, t))
+		if a == -1 || z == -1 || a == z || b.joined(a, z) {
+			continue
+		}
+		saved := slices.Clone(b.lanes)
+		b.addTwoWay(a, z, laneShortcut, false)
+		if !b.sound() {
+			b.lanes = saved
+			continue
+		}
+		planted++
+	}
+}
+
+// nearby: sectors within two hops of x that can take another lane.
+func (b *builder) nearby(g *graph, x int) []int {
+	var out []int
+	for i, d := range hopsFromAny(g.out, []int{x}) {
+		if d == -1 || d > 2 || b.kind[i] == sectorPocket || b.degreeOf(i) >= laneCap {
+			continue
+		}
+		out = append(out, i)
+	}
+	return out
+}
+
+func (b *builder) pick(xs []int) int {
+	if len(xs) == 0 {
+		return -1
+	}
+	return xs[b.rng.IntN(len(xs))]
+}
+
+func (b *builder) publicGraph() *graph {
+	g := newGraph(b.n)
+	for _, l := range b.lanes {
+		if l.published {
+			g.add(l.from, l.to)
+		}
+	}
+	return g
+}
+
 // emit freezes the universe in canonical order. Kinds are not recorded.
 func (b *builder) emit(seed int64) *Universe {
 	u := &Universe{
@@ -391,7 +512,7 @@ func (b *builder) emit(seed int64) *Universe {
 	for i := range b.n {
 		u.Sectors[i] = Sector{ID: i + 1, Core: b.kind[i] == sectorCore}
 		if b.hasPort[i] {
-			u.Ports = append(u.Ports, Port{Sector: i + 1})
+			u.Ports = append(u.Ports, Port{Sector: i + 1, Goods: b.goods[i]})
 		}
 	}
 	for _, l := range b.lanes {

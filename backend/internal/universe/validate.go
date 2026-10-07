@@ -34,7 +34,10 @@ func (u *Universe) validate() error {
 
 // wellShaped checks generation quality. Run only by Generate.
 func (u *Universe) wellShaped() error {
-	return u.checkHubsEmerged()
+	if err := u.checkHubsEmerged(); err != nil {
+		return err
+	}
+	return u.checkShortcutsExist()
 }
 
 func (u *Universe) checkSectors() error {
@@ -163,11 +166,53 @@ func (u *Universe) checkPorts() error {
 			return fmt.Errorf("%w: sector %d has two ports", errInvalid, p.Sector)
 		}
 		seen[p.Sector] = true
+		for c, g := range p.Goods {
+			if g.Capacity <= 0 || g.Regen <= 0 {
+				return fmt.Errorf("%w: port %d commodity %d has capacity %d regen %d",
+					errInvalid, p.Sector, c, g.Capacity, g.Regen)
+			}
+		}
 	}
 	if len(u.Ports) == 0 {
 		return fmt.Errorf("%w: universe has no ports", errInvalid)
 	}
 	return nil
+}
+
+// checkShortcutsExist: enough seller-to-buyer routes are shorter over all
+// lanes than over public ones.
+func (u *Universe) checkShortcutsExist() error {
+	all := u.adjacency()
+	public := u.publicAdjacency()
+	target := shortcutCount(len(u.Sectors))
+	found := 0
+	for c := range commodityCount {
+		var sellers, buyers []int
+		for _, p := range u.Ports {
+			if p.Goods[c].Sells {
+				sellers = append(sellers, p.Sector-1)
+			} else {
+				buyers = append(buyers, p.Sector-1)
+			}
+		}
+		for _, s := range sellers {
+			da := hopsFromAny(all.out, []int{s})
+			dp := hopsFromAny(public.out, []int{s})
+			for _, t := range buyers {
+				if da[t] == -1 {
+					continue
+				}
+				if dp[t] == -1 || dp[t]-da[t] >= shortcutGain {
+					found++
+					if found >= target {
+						return nil
+					}
+				}
+			}
+		}
+	}
+	return fmt.Errorf("%w: %d trade routes shortened by unpublished lanes, want %d",
+		errPoorlyShaped, found, target)
 }
 
 // laneCount is distinct neighbours, which is what laneCap applies to.
