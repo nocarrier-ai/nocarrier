@@ -13,6 +13,7 @@ func build(n int, edges ...[2]int) *graph {
 	return g
 }
 
+// Small graphs that are and are not strongly connected.
 func TestStronglyConnected(t *testing.T) {
 	cases := map[string]struct {
 		g    *graph
@@ -22,11 +23,10 @@ func TestStronglyConnected(t *testing.T) {
 		"single node":  {build(1), true},
 		"cycle":        {build(3, [2]int{0, 1}, [2]int{1, 2}, [2]int{2, 0}), true},
 		"two-way pair": {build(2, [2]int{0, 1}, [2]int{1, 0}), true},
-		// A path is the trap case: 0 reaches 2 but 2 never gets back.
-		"path":      {build(3, [2]int{0, 1}, [2]int{1, 2}), false},
-		"island":    {build(3, [2]int{0, 1}, [2]int{1, 0}), false},
-		"sink":      {build(3, [2]int{0, 1}, [2]int{1, 0}, [2]int{1, 2}), false},
-		"no source": {build(3, [2]int{0, 1}, [2]int{1, 0}, [2]int{2, 1}), false},
+		"path":         {build(3, [2]int{0, 1}, [2]int{1, 2}), false}, // 2 never gets back
+		"island":       {build(3, [2]int{0, 1}, [2]int{1, 0}), false},
+		"sink":         {build(3, [2]int{0, 1}, [2]int{1, 0}, [2]int{1, 2}), false},
+		"no source":    {build(3, [2]int{0, 1}, [2]int{1, 0}, [2]int{2, 1}), false},
 	}
 	for label, c := range cases {
 		t.Run(label, func(t *testing.T) {
@@ -37,8 +37,9 @@ func TestStronglyConnected(t *testing.T) {
 	}
 }
 
+// Multi-source BFS distances; unreachable is -1.
 func TestHopsFromAny(t *testing.T) {
-	// 0 - 1 - 2 - 3, plus an orphan at 4.
+	// 0 - 1 - 2 - 3, plus an orphan at 4
 	g := build(5,
 		[2]int{0, 1}, [2]int{1, 0},
 		[2]int{1, 2}, [2]int{2, 1},
@@ -47,7 +48,6 @@ func TestHopsFromAny(t *testing.T) {
 	if got := hopsFromAny(g.out, []int{0}); !slices.Equal(got, []int{0, 1, 2, 3, -1}) {
 		t.Errorf("from 0 = %v", got)
 	}
-	// Two starts: every sector takes the nearer one.
 	if got := hopsFromAny(g.out, []int{0, 3}); !slices.Equal(got, []int{0, 1, 1, 0, -1}) {
 		t.Errorf("from 0 and 3 = %v", got)
 	}
@@ -56,7 +56,7 @@ func TestHopsFromAny(t *testing.T) {
 	}
 }
 
-// Direction matters: reaching the trunk is asked of the reverse graph.
+// Forward and reverse adjacency differ on a one-way path.
 func TestHopsRespectsDirection(t *testing.T) {
 	g := build(3, [2]int{0, 1}, [2]int{1, 2})
 	if got := hopsFromAny(g.out, []int{0}); !slices.Equal(got, []int{0, 1, 2}) {

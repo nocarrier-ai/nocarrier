@@ -7,10 +7,7 @@ import (
 	"testing"
 )
 
-// testUniverses covers a few shapes. Generation validates, so anything that
-// comes back is already well formed; these cases exist so the invariant tests
-// below run against more than one universe. Generated once for the whole
-// package, since generation is the slow part and the result is immutable.
+// testUniverses is generated once per package run.
 func testUniverses(t *testing.T) []*Universe {
 	t.Helper()
 	return sharedUniverses()
@@ -46,9 +43,9 @@ func name(u *Universe) string {
 	return string(b)
 }
 
+// Same seed and size give byte-identical output.
 func TestGenerateIsDeterministic(t *testing.T) {
-	// Twice in the same process: a dependency on Go's randomised map
-	// iteration order shows up here and nowhere else.
+	// twice in one process catches map-iteration-order dependence
 	for range 4 {
 		a, err := Generate(7, 300)
 		if err != nil {
@@ -66,6 +63,7 @@ func TestGenerateIsDeterministic(t *testing.T) {
 	}
 }
 
+// Different seeds give different universes.
 func TestGenerateDiffersBySeed(t *testing.T) {
 	a, err := Generate(1, 300)
 	if err != nil {
@@ -82,7 +80,7 @@ func TestGenerateDiffersBySeed(t *testing.T) {
 	}
 }
 
-// The rule the whole design rests on. No traps, ever.
+// Every sector reaches every other and has at least one exit.
 func TestNobodyIsStranded(t *testing.T) {
 	for _, u := range testUniverses(t) {
 		if !u.adjacency().stronglyConnected() {
@@ -96,7 +94,7 @@ func TestNobodyIsStranded(t *testing.T) {
 	}
 }
 
-// A sector joined only to one neighbour must be able to go back out that way.
+// A sector with exactly one neighbour has a lane to it in both directions.
 func TestSpursAreTwoWay(t *testing.T) {
 	spurs := 0
 	for _, u := range testUniverses(t) {
@@ -121,7 +119,6 @@ func TestSpursAreTwoWay(t *testing.T) {
 	t.Logf("checked %d spurs", spurs)
 }
 
-// publicAtBigBang indexes the initial public set for a test.
 func publicAtBigBang(u *Universe) map[Lane]bool {
 	m := make(map[Lane]bool, len(u.PublicAtBigBang))
 	for _, l := range u.PublicAtBigBang {
@@ -130,9 +127,8 @@ func publicAtBigBang(u *Universe) map[Lane]bool {
 	return m
 }
 
-// Pockets carry no label, so they are found the way a player finds them: by
-// shape. One way in from one sector, one way out to a different sector, and
-// neither lane in the public map.
+// Pockets have no label; find them by shape: one lane in, one lane out to
+// somewhere else, neither public.
 func TestPocketsAreConcealedAndEscapable(t *testing.T) {
 	pockets := 0
 	for _, u := range testUniverses(t) {
@@ -147,9 +143,6 @@ func TestPocketsAreConcealedAndEscapable(t *testing.T) {
 				continue
 			}
 			pockets++
-			// Escapable: the exit is a real outbound lane of the pocket itself,
-			// which is what makes it discoverable by scanning from inside, and
-			// strong connectivity (checked elsewhere) means it leads home.
 			if _, ok := u.Sector(exits[0].To); !ok {
 				t.Errorf("%s: pocket %d exits to nowhere", name(u), s.ID)
 			}
@@ -161,6 +154,7 @@ func TestPocketsAreConcealedAndEscapable(t *testing.T) {
 	t.Logf("found %d pockets by shape", pockets)
 }
 
+// No sector has more than laneCap distinct neighbours.
 func TestLaneCapRespected(t *testing.T) {
 	for _, u := range testUniverses(t) {
 		for _, s := range u.Sectors {
@@ -171,8 +165,7 @@ func TestLaneCapRespected(t *testing.T) {
 	}
 }
 
-// Proves the trunk structure emerged rather than being hoped for: some sectors
-// are busy junctions and most are backwaters.
+// Some sectors have 4+ lanes and at least half have fewer.
 func TestHubsAndBackwatersBothExist(t *testing.T) {
 	for _, u := range testUniverses(t) {
 		busy, quiet := 0, 0
@@ -193,9 +186,7 @@ func TestHubsAndBackwatersBothExist(t *testing.T) {
 	}
 }
 
-// The core takes the lowest IDs, following TW2002's FedSpace, and is protected
-// space. Protected does not mean ported: the sectors around the spawn are part
-// of the core whether or not anyone trades there.
+// Core is the lowest IDs and does not imply a port.
 func TestCoreTakesLowestIDs(t *testing.T) {
 	for _, u := range testUniverses(t) {
 		core := coreSize(len(u.Sectors))
@@ -216,8 +207,7 @@ func TestCoreTakesLowestIDs(t *testing.T) {
 	}
 }
 
-// Protected space is fully public from the start; the rest of the map has
-// something to find.
+// All core lanes are public at creation; the public set is neither empty nor everything.
 func TestPublicationRules(t *testing.T) {
 	for _, u := range testUniverses(t) {
 		public := publicAtBigBang(u)
@@ -237,7 +227,7 @@ func TestPublicationRules(t *testing.T) {
 	}
 }
 
-// If the character pass converts nothing, the map is a road atlas.
+// At least one lane has no reverse.
 func TestOneWayLanesExist(t *testing.T) {
 	for _, u := range testUniverses(t) {
 		pairs := make(map[[2]int]bool, len(u.Lanes))
@@ -256,8 +246,7 @@ func TestOneWayLanesExist(t *testing.T) {
 	}
 }
 
-// Lanes and ports come out in canonical order so two instances can compare
-// universes byte for byte.
+// Lanes, PublicAtBigBang and Ports are sorted.
 func TestCanonicalOrdering(t *testing.T) {
 	for _, u := range testUniverses(t) {
 		for i := 1; i < len(u.Lanes); i++ {
@@ -280,6 +269,7 @@ func TestCanonicalOrdering(t *testing.T) {
 	}
 }
 
+// The port share lands near portPercent.
 func TestPortsRoughlyHitTarget(t *testing.T) {
 	for _, u := range testUniverses(t) {
 		got := len(u.Ports) * 100 / len(u.Sectors)
@@ -290,12 +280,14 @@ func TestPortsRoughlyHitTarget(t *testing.T) {
 	}
 }
 
+// Generate refuses fewer than minSectors.
 func TestRejectsTooSmallAUniverse(t *testing.T) {
 	if _, err := Generate(1, minSectors-1); err == nil {
 		t.Fatal("generated a universe too small for its own shape rules")
 	}
 }
 
+// Out-of-range IDs return zero values, not panics.
 func TestAccessorsOutOfRange(t *testing.T) {
 	u, err := Generate(1, 64)
 	if err != nil {

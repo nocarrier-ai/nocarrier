@@ -6,27 +6,15 @@ import (
 	"slices"
 )
 
-// errInvalid marks a universe that failed its structural invariants.
+// errInvalid: structural integrity failed.
 var errInvalid = errors.New("invalid universe")
 
-// errPoorlyShaped marks a universe that is sound but came out badly: no hubs
-// emerged. Generate reseeds on it.
+// errPoorlyShaped: sound, but no hub structure. Generate reseeds.
 var errPoorlyShaped = errors.New("poorly shaped universe")
 
-// validate checks structural integrity: the things that, if false, mean the
-// map cannot be played at all. References resolve, nobody is stranded, the
-// lane cap and the spur rule hold. A stored map that fails this is refused on
-// load, because starting anyway would strand ships.
-//
-// It checks only what is true in the world. The generator's own rules — that
-// trunk lanes start public, that a pocket's exit does not — are not recorded
-// as such and are not checked here; they are enforced where the generator
-// makes them.
-//
-// It deliberately does not judge quality. A universe that already exists with
-// a bland degree distribution is still the universe; refusing to boot over it
-// would be strictly worse than running it. Quality is wellShaped's job and is
-// only asked of a map at generation time.
+// validate checks structural integrity: references resolve, nobody is
+// stranded, the lane cap and spur rule hold. Runs on load. Does not judge
+// shape; see wellShaped.
 func (u *Universe) validate() error {
 	for _, check := range []func() error{
 		u.checkSectors,
@@ -44,9 +32,7 @@ func (u *Universe) validate() error {
 	return nil
 }
 
-// wellShaped checks generation quality: that the trunk structure actually
-// emerged. A map that fails this is sound but not worth keeping, so Generate
-// reseeds. It is never run against a stored map.
+// wellShaped checks generation quality. Run only by Generate.
 func (u *Universe) wellShaped() error {
 	return u.checkHubsEmerged()
 }
@@ -88,8 +74,7 @@ func (u *Universe) checkLanes() error {
 	return nil
 }
 
-// checkPublicAtBigBang requires every initially-public lane to be a lane that
-// exists; the set is a subset of Lanes, not a second list of them.
+// checkPublicAtBigBang: every initially-public lane exists.
 func (u *Universe) checkPublicAtBigBang() error {
 	exists := make(map[Lane]bool, len(u.Lanes))
 	for _, l := range u.Lanes {
@@ -103,8 +88,7 @@ func (u *Universe) checkPublicAtBigBang() error {
 	return nil
 }
 
-// checkNobodyStranded is the rule the whole design rests on: every sector can
-// reach every other sector. No traps, ever.
+// checkNobodyStranded: every sector reaches every other. No traps.
 func (u *Universe) checkNobodyStranded() error {
 	if !u.adjacency().stronglyConnected() {
 		return fmt.Errorf("%w: graph is not strongly connected; some sector is a trap", errInvalid)
@@ -126,8 +110,7 @@ func (u *Universe) checkLaneCap() error {
 	return nil
 }
 
-// checkHubsEmerged proves the trunk structure actually happened rather than
-// being hoped for: a few sectors are busy junctions and most are not.
+// checkHubsEmerged: some sectors are busy, most are quiet.
 func (u *Universe) checkHubsEmerged() error {
 	busy, quiet := 0, 0
 	for _, s := range u.Sectors {
@@ -147,13 +130,8 @@ func (u *Universe) checkHubsEmerged() error {
 	return nil
 }
 
-// checkSpurs enforces the rule that a sector joined only to one neighbour must
-// be able to go back out the way it came. A one-way spur is a trap by another
-// name.
-//
-// Having a single *exit* is not a spur. A sector entered from one neighbour and
-// left towards a different one is an ordinary one-way pass-through, which is
-// exactly the texture the character pass is for.
+// checkSpurs: a sector with one neighbour must have a two-way lane to it. One
+// exit alone is a pass-through, not a spur.
 func (u *Universe) checkSpurs() error {
 	for _, s := range u.Sectors {
 		n := u.neighbours(s.ID)
@@ -192,14 +170,12 @@ func (u *Universe) checkPorts() error {
 	return nil
 }
 
-// laneCount is how many distinct neighbours a sector is joined to, counting a
-// two-way lane once. This is the number the lane cap applies to.
+// laneCount is distinct neighbours, which is what laneCap applies to.
 func (u *Universe) laneCount(sectorID int) int {
 	return len(u.neighbours(sectorID))
 }
 
-// neighbours returns the distinct sectors joined to this one in either
-// direction, in ascending order.
+// neighbours: distinct sectors joined in either direction, ascending.
 func (u *Universe) neighbours(sectorID int) []int {
 	seen := map[int]bool{}
 	for _, l := range u.Exits(sectorID) {

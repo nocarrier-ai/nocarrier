@@ -21,6 +21,7 @@ func startStore(t *testing.T) (*Store, jetstream.JetStream) {
 	return s, js
 }
 
+// Load returns ErrNoMap on an empty bucket.
 func TestStoreLoadBeforeTheBigBang(t *testing.T) {
 	s, _ := startStore(t)
 	_, err := s.Load(natstest.Context(t))
@@ -29,6 +30,7 @@ func TestStoreLoadBeforeTheBigBang(t *testing.T) {
 	}
 }
 
+// A stored map loads back equal, with lookups rebuilt.
 func TestStoreCreateThenLoad(t *testing.T) {
 	s, _ := startStore(t)
 	ctx := natstest.Context(t)
@@ -51,7 +53,7 @@ func TestStoreCreateThenLoad(t *testing.T) {
 		!slices.Equal(back.Ports, u.Ports) || !slices.Equal(back.PublicAtBigBang, u.PublicAtBigBang) {
 		t.Error("sectors, lanes, ports or the public set changed in the round trip")
 	}
-	// The derived lookups are rebuilt on load, not stored.
+	// lookups are rebuilt on load
 	for _, sec := range u.Sectors {
 		if !slices.Equal(back.Exits(sec.ID), u.Exits(sec.ID)) {
 			t.Fatalf("exits of %d differ after load", sec.ID)
@@ -62,8 +64,7 @@ func TestStoreCreateThenLoad(t *testing.T) {
 	}
 }
 
-// The create is the big-bang election: whichever instance lands its map first
-// owns the universe, and the others must read that one rather than their own.
+// A second Create fails with ErrMapExists and the first map stays.
 func TestStoreCreateIsOnce(t *testing.T) {
 	s, _ := startStore(t)
 	ctx := natstest.Context(t)
@@ -90,6 +91,7 @@ func TestStoreCreateIsOnce(t *testing.T) {
 	}
 }
 
+// Concurrent Creates: exactly one wins, and Load returns its map.
 func TestStoreCreateRacesSafely(t *testing.T) {
 	s, _ := startStore(t)
 	ctx := natstest.Context(t)
@@ -127,7 +129,6 @@ func TestStoreCreateRacesSafely(t *testing.T) {
 		t.Fatal("nobody won the big bang")
 	}
 
-	// Everyone, winner or not, must see the same universe.
 	back, err := s.Load(ctx)
 	if err != nil {
 		t.Fatal(err)
@@ -137,8 +138,7 @@ func TestStoreCreateRacesSafely(t *testing.T) {
 	}
 }
 
-// A stored map that fails its own invariants is worse than no map: it would
-// quietly strand ships. Loading it has to fail.
+// Load refuses a stored map that fails validate.
 func TestStoreLoadRejectsAnInvalidMap(t *testing.T) {
 	s, js := startStore(t)
 	ctx := natstest.Context(t)
@@ -161,6 +161,7 @@ func TestStoreLoadRejectsAnInvalidMap(t *testing.T) {
 	}
 }
 
+// Load reports errCorrupt for bytes that do not decode.
 func TestStoreLoadRejectsGarbage(t *testing.T) {
 	s, js := startStore(t)
 	ctx := natstest.Context(t)
@@ -177,9 +178,7 @@ func TestStoreLoadRejectsGarbage(t *testing.T) {
 	}
 }
 
-// chainUniverse hand-builds a sound but badly shaped map: a two-way line of n
-// sectors. Every integrity rule holds — strongly connected, nobody stranded,
-// spurs two-way — but no hub ever emerges.
+// chainUniverse: a two-way line. Structurally sound, no hubs.
 func chainUniverse(n int) *Universe {
 	u := &Universe{Version: version, Seed: 1, Spawn: 1}
 	for i := 1; i <= n; i++ {
@@ -198,8 +197,7 @@ func chainUniverse(n int) *Universe {
 	return u
 }
 
-// A universe that already exists is the universe. A poor shape must not stop
-// an instance from booting into it; only a structural fault may.
+// Load accepts a map that fails wellShaped; shape is not an integrity rule.
 func TestStoreLoadAcceptsASoundButPoorlyShapedMap(t *testing.T) {
 	u := chainUniverse(25)
 	if err := u.validate(); err != nil {
@@ -223,7 +221,7 @@ func TestStoreLoadAcceptsASoundButPoorlyShapedMap(t *testing.T) {
 	}
 }
 
-// Generate, by contrast, must not hand back a poorly shaped universe.
+// Everything Generate returns passes wellShaped.
 func TestGenerateRequiresGoodShape(t *testing.T) {
 	for _, u := range testUniverses(t) {
 		if err := u.wellShaped(); err != nil {

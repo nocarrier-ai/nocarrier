@@ -1,9 +1,6 @@
 package universe
 
-// graph is a directed adjacency structure over sectors indexed from 0. It is
-// rebuilt from the working edge set whenever the one-way pass needs to test a
-// conversion, which happens once per candidate at generation time and never
-// afterwards.
+// graph is a directed adjacency over 0-based sector indices.
 type graph struct {
 	out [][]int
 	in  [][]int
@@ -18,13 +15,7 @@ func (g *graph) add(from, to int) {
 	g.in[to] = append(g.in[to], from)
 }
 
-// stronglyConnected reports whether every sector can reach every other one.
-// A graph is strongly connected exactly when one vertex reaches all vertices
-// and all vertices reach it, so two traversals from sector 0 suffice.
-//
-// This is the check that enforces the rule that nobody gets stranded. Every
-// conversion in the character pass is tested against it and reverted if it
-// fails.
+// stronglyConnected: one vertex reaches all and all reach it.
 func (g *graph) stronglyConnected() bool {
 	n := len(g.out)
 	if n == 0 {
@@ -33,7 +24,7 @@ func (g *graph) stronglyConnected() bool {
 	return reachable(g.out, 0) == n && reachable(g.in, 0) == n
 }
 
-// reachable counts the vertices reachable from start over adj, start included.
+// reachable counts the vertices reachable from start, inclusive.
 func reachable(adj [][]int, start int) int {
 	seen := make([]bool, len(adj))
 	seen[start] = true
@@ -54,8 +45,8 @@ func reachable(adj [][]int, start int) int {
 	return count
 }
 
-// hopsFromAny returns the number of lanes from the nearest member of starts to
-// every sector, or -1 where none reaches it.
+// hopsFromAny returns hops from the nearest start to every vertex, -1 if
+// unreachable.
 func hopsFromAny(adj [][]int, starts []int) []int {
 	dist := make([]int, len(adj))
 	for i := range dist {
@@ -82,8 +73,7 @@ func hopsFromAny(adj [][]int, starts []int) []int {
 	return dist
 }
 
-// adjacency builds the forward and reverse adjacency of a finished universe,
-// indexed from 0.
+// adjacency builds the graph of a finished universe.
 func (u *Universe) adjacency() *graph {
 	g := newGraph(len(u.Sectors))
 	for _, l := range u.Lanes {

@@ -6,60 +6,41 @@ import (
 	"slices"
 )
 
-// maxAttempts bounds the reseed loop. Validation failures should be rare; a
-// universe that cannot be generated in this many tries means the parameters
-// are wrong, not that we were unlucky.
+// maxAttempts bounds the reseed loop.
 const maxAttempts = 16
 
-// treeDepthBound is how deep a region tree may grow from its hub. It leaves
-// room inside trunkReach for the detours one-way lanes force, since reaching
-// the trunk is a directed question and a tree depth is not.
+// treeDepthBound caps how deep a region tree grows from its hub, leaving slack
+// under trunkReach for one-way detours.
 const treeDepthBound = 10
 
-// extraLaneReach is how far along the tree an extra lane may reach. Joining a
-// sector to something two or three tree hops away makes a short cycle, which
-// is what "more than one way through" means in a graph. Hops are the only
-// distance this universe has.
+// extraLaneReach is how many tree hops away an extra lane may join, so that it
+// closes a short cycle.
 const extraLaneReach = 3
 
-// minSectors is the smallest universe the shape rules can be satisfied in.
+// minSectors is the smallest universe the shape rules can be met in.
 const minSectors = 16
 
-// Generation knobs. None of these values are defended by anything but taste
-// yet; the design doc says they need a universe to look at before they can be
-// tuned. Until that happens they are constants, and the whole interface to
-// generation is a seed and a size.
+// trunkReach is the most hops any sector may be from a trunk lane.
+const trunkReach = 16
+
+// Generation knobs. Constants until there is a universe to tune them against.
 const (
-	// oneWayPercent is the share of eligible lanes made one-directional.
-	oneWayPercent = 15
-	// portPercent is roughly what share of sectors hold a port.
-	portPercent = 33
-	// regionalPublishedPercent is the share of regional lanes in the public
-	// map at the big bang. Core and trunk lanes are always published and
-	// pocket lanes never are.
-	regionalPublishedPercent = 90
+	oneWayPercent            = 15 // share of eligible lanes made one-way
+	portPercent              = 33 // share of sectors with a port
+	regionalPublishedPercent = 90 // share of regional lanes public at creation
 )
 
-// coreSize is how many sectors make up protected space.
 func coreSize(n int) int { return max(4, min(10, n/8)) }
-
-// hubCount is how many sectors anchor the trunk.
 func hubCount(n int) int { return max(3, n/100) }
 
-// extraRegionalLanes is how many non-tree lanes each region gets. A region
-// tree alone averages two lanes per sector, which is a chain, not a mesh; half
-// the region again in extra lanes lifts that to a little under three.
+// extraRegionalLanes per region. Half the region size lifts average degree
+// from about 2 to about 3.
 func extraRegionalLanes(n int) int { return max(2, n/hubCount(n)/2) }
 
-// pocketCount is how many pockets to carve.
 func pocketCount(n int) int { return max(1, n/100) }
 
-// Generate builds a universe of the given size for a seed. Pure: the same
-// arguments always produce the same universe, which matters for tests and for
-// reproducing a report, but is no longer load-bearing now that the map is
-// stored rather than recomputed.
-//
-// It validates and reseeds rather than repairing a bad graph in place.
+// Generate builds a universe of sectors for seed. Deterministic. A bad result
+// is reseeded, not repaired.
 func Generate(seed int64, sectors int) (*Universe, error) {
 	if sectors < minSectors {
 		return nil, fmt.Errorf("universe needs at least %d sectors, got %d", minSectors, sectors)
@@ -84,16 +65,7 @@ func Generate(seed int64, sectors int) (*Universe, error) {
 	return nil, fmt.Errorf("no valid universe in %d attempts: %w", maxAttempts, last)
 }
 
-// trunkReach is the furthest any sector may be from a trunk lane. The highway
-// has to be usable from wherever you are, or the trunk structure is
-// decoration. Region trees are built to treeDepthBound; the slack above it
-// absorbs the detours one-way lanes force, because reaching the trunk is a
-// directed question and a tree depth is not.
-const trunkReach = 16
-
-// sectorKind and laneKind are the generator's own vocabulary for what it is
-// building. They drive the passes and are never recorded in the map: the
-// world knows only sectors, lanes, publication and protected space.
+// sectorKind and laneKind drive the passes and are not recorded in the map.
 type sectorKind uint8
 
 const (
@@ -116,19 +88,16 @@ func newRNG(seed int64, attempt int) *rand.Rand {
 	return rand.New(rand.NewPCG(uint64(seed), uint64(attempt)))
 }
 
-// workLane is a directed edge in the working set, the same shape the output
-// has. A two-way lane is two of them; making a lane one-way deletes one. There
-// is nothing here but from and to: no position, no length, no orientation.
-// This is a graph, and the generator only ever reasons about nodes and edges.
+// workLane is a directed edge in the working set. A two-way lane is two of
+// them.
 type workLane struct {
 	from, to  int
 	kind      laneKind
 	published bool
 }
 
-// builder holds the working state. Sector indices are 0-based internally and
-// become 1-based IDs on output. The core takes the first indices and the hubs
-// the next, so sector 1 is in the core by construction.
+// builder holds the working state. Indices are 0-based; IDs are index+1. The
+// core takes the first indices and the hubs the next.
 type builder struct {
 	rng *rand.Rand
 	n   int
@@ -157,19 +126,15 @@ func generate(seed int64, attempt, n int) *Universe {
 	b.carvePockets()
 	b.placePorts()
 
-	// Every lane mutation above was tested against sound, so this holds; it is
-	// asserted once more here so the guarantee is checked, not argued. The lane
-	// cap is not repaired here either: every pass checks it before adding, and
-	// if one slips past, validate rejects the map and the loop reseeds.
+	// Every mutating pass checks sound; asserted once more on the final set.
 	if !b.sound() {
 		return nil
 	}
 	return b.emit(seed)
 }
 
-// buildCore takes the first coreSize(n) sectors as protected space and wires them
-// densely but inside the lane cap: a ring so they are certainly connected, then
-// chords in a shuffled order wherever both ends still have room.
+// buildCore wires the first coreSize(n) sectors: a ring, then shuffled chords
+// while both ends have room.
 func (b *builder) buildCore() {
 	for i := range coreSize(b.n) {
 		b.core = append(b.core, i)
@@ -181,13 +146,13 @@ func (b *builder) buildCore() {
 	}
 	var pairs [][2]int
 	for i := range c {
-		for j := i + 2; j < c; j++ { // ring neighbours are already joined
+		for j := i + 2; j < c; j++ {
 			pairs = append(pairs, [2]int{b.core[i], b.core[j]})
 		}
 	}
 	b.rng.Shuffle(len(pairs), func(x, y int) { pairs[x], pairs[y] = pairs[y], pairs[x] })
 	for _, pr := range pairs {
-		// Leave room on every core sector for the trunk splice.
+		// leave room for the trunk splice
 		if b.degreeOf(pr[0]) >= laneCap-2 || b.degreeOf(pr[1]) >= laneCap-2 {
 			continue
 		}
@@ -195,10 +160,7 @@ func (b *builder) buildCore() {
 	}
 }
 
-// buildTrunk designates the next Hubs sectors as hubs, joins them in a loop,
-// and splices the core into it. A loop rather than a line means the highway
-// has no dead end and there are always two ways around a blockade. Which hubs
-// sit next to each other on the ring is arbitrary: a ring is a ring.
+// buildTrunk joins the hubs in a ring and splices the core into it.
 func (b *builder) buildTrunk() {
 	for i := range hubCount(b.n) {
 		h := coreSize(b.n) + i
@@ -209,16 +171,14 @@ func (b *builder) buildTrunk() {
 	for i := range n {
 		b.addTwoWay(b.hubs[i], b.hubs[(i+1)%n], laneTrunk, true)
 	}
-	// Splice: open one ring segment and route both its ends through the core.
+	// open one segment and route it through the core
 	b.removeTwoWay(b.hubs[0], b.hubs[1])
 	b.addTwoWay(b.hubs[0], b.core[0], laneTrunk, true)
 	b.addTwoWay(b.hubs[1], b.core[1], laneTrunk, true)
 }
 
-// buildRegions deals the remaining sectors out to the hubs in contiguous runs,
-// then wires each region as a tree rooted at its hub. The tree is what
-// guarantees every sector can reach the trunk; the extra lanes give more than
-// one way through.
+// buildRegions deals the remaining sectors to the hubs in contiguous runs and
+// grows a tree per region.
 func (b *builder) buildRegions() {
 	first := coreSize(b.n) + hubCount(b.n)
 	members := make([][]int, len(b.hubs))
@@ -232,15 +192,8 @@ func (b *builder) buildRegions() {
 	}
 }
 
-// growTree attaches each member to a random sector already in the tree that
-// still has room, under both a degree bound and a depth bound. The degree
-// bound stops the tree pushing a sector past the lane cap on its own. The
-// depth bound stops it growing into a long thin chain, which is how a sector
-// ends up a dozen hops from the hub that anchors it. Bounding depth makes "the
-// trunk is always nearby" true by construction instead of by luck.
-//
-// Then it adds the region's extra lanes, each joining a sector to another a
-// few tree hops away, so the region has short cycles rather than only a tree.
+// growTree attaches each member to a random tree node under the degree and
+// depth bounds, then adds the region's extra lanes a few tree hops apart.
 func (b *builder) growTree(hub int, members []int) {
 	inTree := []int{hub}
 	depth := make([]int, b.n)
@@ -252,10 +205,8 @@ func (b *builder) growTree(hub int, members []int) {
 				admissible = append(admissible, t)
 			}
 		}
-		// Every tree node is saturated: attach anywhere rather than orphan
-		// the sector, and let the cap pass and validation sort it out.
 		if len(admissible) == 0 {
-			admissible = inTree
+			admissible = inTree // all saturated; validate catches an over-cap sector
 		}
 		parent := admissible[b.rng.IntN(len(admissible))]
 		b.addTwoWay(parent, m, laneRegional, b.publishRegional())
@@ -282,9 +233,8 @@ func (b *builder) growTree(hub int, members []int) {
 	}
 }
 
-// extraLaneCandidates returns the sectors two to extraLaneReach tree hops from
-// start: close enough that joining one makes a short cycle, not so close that
-// it is already a neighbour.
+// extraLaneCandidates returns the sectors 2..extraLaneReach tree hops from
+// start.
 func (b *builder) extraLaneCandidates(treeAdj [][]int, start int) []int {
 	dist := make([]int, b.n)
 	for i := range dist {
@@ -313,20 +263,16 @@ func (b *builder) extraLaneCandidates(treeAdj [][]int, start int) []int {
 	return out
 }
 
-// convertOneWay makes a share of ordinary lanes one-directional, which is what
-// makes the map feel like TW2002 rather than a road atlas. Every conversion is
-// tested against strong connectivity and reverted if it would strand anyone.
-//
-// A sector's only lane is never converted: per the design, a spur has to let
-// the player back out the way they came.
+// convertOneWay makes a share of regional lanes one-directional, reverting any
+// that break sound. A spur's only lane is never converted.
 func (b *builder) convertOneWay() {
 	var eligible [][2]int
 	for _, l := range b.lanes {
 		if l.from > l.to || l.kind != laneRegional || !b.hasLane(l.to, l.from) {
-			continue // visit each two-way regional pair once
+			continue // each two-way regional pair once
 		}
 		if b.degreeOf(l.from) < 2 || b.degreeOf(l.to) < 2 {
-			continue // sole lane of a spur; must stay two-way
+			continue // sole lane of a spur
 		}
 		eligible = append(eligible, [2]int{l.from, l.to})
 	}
@@ -351,10 +297,8 @@ func (b *builder) convertOneWay() {
 	}
 }
 
-// carvePockets builds the structures players hunt for: a sector entered by one
-// unpublished one-way lane and left by another to somewhere else. Concealed,
-// and never a trap — the exit is a real lane, discoverable by scanning from
-// inside.
+// carvePockets turns leaves into pockets: one unpublished one-way lane in, one
+// out to somewhere else.
 func (b *builder) carvePockets() {
 	var leaves []int
 	for i := range b.n {
@@ -379,10 +323,8 @@ func (b *builder) carvePockets() {
 			continue
 		}
 
-		// Try it against a snapshot. Restoring the whole working set is both
-		// simpler and more obviously correct than unpicking each change.
 		saved := slices.Clone(b.lanes)
-		b.takeLane(p, in) // the way in becomes one-way, towards the pocket
+		b.takeLane(p, in)
 		for i := range b.lanes {
 			if b.lanes[i].from == in && b.lanes[i].to == p {
 				b.lanes[i].kind, b.lanes[i].published = lanePocket, false
@@ -399,8 +341,8 @@ func (b *builder) carvePockets() {
 	}
 }
 
-// pocketExit picks where a pocket leads: any sector with room for another lane
-// that is not the pocket itself, not the way in, and not already joined to it.
+// pocketExit picks any sector with room that is not p, not the way in, and not
+// already joined to p.
 func (b *builder) pocketExit(p, in int) int {
 	var candidates []int
 	for i := range b.n {
@@ -415,12 +357,8 @@ func (b *builder) pocketExit(p, in int) int {
 	return candidates[b.rng.IntN(len(candidates))]
 }
 
-// placePorts seeds trading posts. Roughly a third of sectors overall, weighted
-// so hubs almost always have one and the periphery rarely does. The spawn
-// always has one, because a new admiral has to be able to buy fuel; the rest
-// of protected space is protected, not ported, and rolls like anywhere else.
-// Pockets mostly stay empty: a pocket with no port is what a player wants to
-// build their own in.
+// placePorts: the spawn always, hubs usually, pockets rarely, everything else
+// at portPercent.
 func (b *builder) placePorts() {
 	for i := range b.n {
 		var chance int
@@ -441,11 +379,7 @@ func (b *builder) placePorts() {
 	}
 }
 
-// emit freezes the universe. IDs are indices plus one, so the core is sectors
-// 1..coreSize(n) and the hubs follow it. Only what is true in the world is
-// recorded; the generator's kinds stay behind, and which lanes start public
-// goes to PublicAtBigBang rather than onto the lanes. Everything comes out in
-// canonical order so the whole value compares byte for byte.
+// emit freezes the universe in canonical order. Kinds are not recorded.
 func (b *builder) emit(seed int64) *Universe {
 	u := &Universe{
 		Version: version,
@@ -480,8 +414,6 @@ func cmpLane(x, y Lane) int {
 	return x.To - y.To
 }
 
-// --- working-set helpers ---
-
 func (b *builder) hasLane(from, to int) bool {
 	for _, l := range b.lanes {
 		if l.from == from && l.to == to {
@@ -491,13 +423,13 @@ func (b *builder) hasLane(from, to int) bool {
 	return false
 }
 
-// joined reports whether any lane runs between two sectors in either direction.
+// joined: any lane between a and z, either direction.
 func (b *builder) joined(a, z int) bool {
 	return b.hasLane(a, z) || b.hasLane(z, a)
 }
 
-// neighboursOf returns the distinct sectors joined to this one in either
-// direction. Its length is the number the lane cap applies to.
+// neighboursOf: distinct sectors joined to i. Its length is what laneCap
+// counts.
 func (b *builder) neighboursOf(i int) []int {
 	var out []int
 	for _, l := range b.lanes {
@@ -520,8 +452,7 @@ func (b *builder) addOneWay(from, to int, kind laneKind, published bool) {
 	b.lanes = append(b.lanes, workLane{from: from, to: to, kind: kind, published: published})
 }
 
-// addTwoWay adds a lane in both directions. Reports false if the pair is
-// already joined.
+// addTwoWay adds both directions; false if already joined.
 func (b *builder) addTwoWay(a, z int, kind laneKind, published bool) bool {
 	if a == z || b.joined(a, z) {
 		return false
@@ -531,8 +462,7 @@ func (b *builder) addTwoWay(a, z int, kind laneKind, published bool) bool {
 	return true
 }
 
-// takeLane removes one directed lane and returns it, so a caller trying a
-// conversion can put it back.
+// takeLane removes one directed lane and returns it.
 func (b *builder) takeLane(from, to int) workLane {
 	for i, l := range b.lanes {
 		if l.from == from && l.to == to {
@@ -552,7 +482,6 @@ func (b *builder) publishRegional() bool {
 	return b.rng.IntN(100) < regionalPublishedPercent
 }
 
-// graph builds the directed adjacency from the working set.
 func (b *builder) graph() *graph {
 	g := newGraph(b.n)
 	for _, l := range b.lanes {
@@ -561,15 +490,8 @@ func (b *builder) graph() *graph {
 	return g
 }
 
-// sound reports whether the working graph still satisfies the two structural
-// invariants every conversion has to preserve: nobody is stranded, and the
-// trunk is reachable from everywhere inside trunkReach hops.
-//
-// Both are checked here rather than left to validation because a conversion
-// that breaks either is simply reverted, and reverting one is far cheaper than
-// throwing away a whole universe. Reaching the trunk is a directed question,
-// so a one-way lane pointing the wrong way can push a sector well past its
-// tree depth.
+// sound reports whether the working graph is strongly connected and every
+// sector is within trunkReach of a trunk lane.
 func (b *builder) sound() bool {
 	g := b.graph()
 	if !g.stronglyConnected() {

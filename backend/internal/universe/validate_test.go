@@ -6,9 +6,7 @@ import (
 	"testing"
 )
 
-// mutate copies a known-good universe, applies a change, and re-indexes. Used
-// to prove each invariant actually fires, rather than trusting that the
-// generator happens never to break it.
+// mutate copies a good universe, applies a change, and re-indexes.
 func mutate(t *testing.T, change func(*Universe)) *Universe {
 	t.Helper()
 	src, err := Generate(5, 64)
@@ -27,6 +25,7 @@ func mutate(t *testing.T, change func(*Universe)) *Universe {
 	return u
 }
 
+// A generated universe passes validate.
 func TestValidateAcceptsAGeneratedUniverse(t *testing.T) {
 	u := mutate(t, func(*Universe) {})
 	if err := u.validate(); err != nil {
@@ -34,6 +33,7 @@ func TestValidateAcceptsAGeneratedUniverse(t *testing.T) {
 	}
 }
 
+// Each structural fault is caught and reported as errInvalid.
 func TestValidateRejects(t *testing.T) {
 	cases := map[string]func(*Universe){
 		"renumbered sector": func(u *Universe) { u.Sectors[5].ID = 999 },
@@ -56,13 +56,10 @@ func TestValidateRejects(t *testing.T) {
 		"public lane that does not exist": func(u *Universe) {
 			u.PublicAtBigBang = append(u.PublicAtBigBang, Lane{From: 1, To: 100000})
 		},
-		// Sever every way out of one sector: the trap case the whole design
-		// forbids.
-		"stranded sector": func(u *Universe) {
+		"stranded sector": func(u *Universe) { // no way out
 			u.Lanes = slices.DeleteFunc(u.Lanes, func(l Lane) bool { return l.From == 40 })
 		},
-		// Reachable by nobody: the trap case from the other direction.
-		"unreachable sector": func(u *Universe) {
+		"unreachable sector": func(u *Universe) { // no way in
 			u.Lanes = slices.DeleteFunc(u.Lanes, func(l Lane) bool { return l.To == 41 })
 		},
 		"port in a sector that does not exist": func(u *Universe) {
@@ -88,8 +85,7 @@ func TestValidateRejects(t *testing.T) {
 	}
 }
 
-// A spur whose single lane is one-way is a trap by another name, and the one
-// change that is easy to make by accident.
+// A one-neighbour sector whose only lane is one-way is rejected.
 func TestValidateRejectsOneWaySpur(t *testing.T) {
 	u := mutate(t, func(u *Universe) {
 		for _, s := range u.Sectors {
