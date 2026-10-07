@@ -328,9 +328,10 @@ versions are recorded in events; history is never replayed under new rules.
 ## Process anatomy
 
 One binary, no roles, no flags; env vars only (NATS_URL, NATS_CREDS,
-NOCARRIER_EMBEDDED_NATS, NOCARRIER_TICK_PERIOD, NOCARRIER_EXECUTE_WORKERS,
-NOCARRIER_DECIDE_WORKERS, NOCARRIER_JEV_URL, NOCARRIER_HTTP_ADDR,
-NOCARRIER_LOG_LEVEL). 
+NOCARRIER_EMBEDDED_NATS, NOCARRIER_SECTORS, NOCARRIER_TICK_PERIOD,
+NOCARRIER_EXECUTE_WORKERS, NOCARRIER_DECIDE_WORKERS, NOCARRIER_JEV_URL,
+NOCARRIER_HTTP_ADDR, NOCARRIER_LOG_LEVEL, and NO_COLOR for a plain-text
+startup banner). 
 
 Instance ID is a random value per
 process start, used only to recognize the instance's own TickAdvanced.

@@ -227,6 +227,33 @@ func TestPublicationRules(t *testing.T) {
 	}
 }
 
+// Public lanes sit nearer the spawn than unpublished ones: charted around the
+// hubs, dark at the frontier.
+func TestPublicMapThinsWithDepth(t *testing.T) {
+	u, err := Generate(1, 1000)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dist := hopsFromAny(u.adjacency().out, []int{u.Spawn - 1})
+	public := publicAtBigBang(u)
+	pubSum, pubN, darkSum, darkN := 0, 0, 0, 0
+	for _, l := range u.Lanes {
+		d := max(dist[l.From-1], dist[l.To-1])
+		if public[l] {
+			pubSum, pubN = pubSum+d, pubN+1
+		} else {
+			darkSum, darkN = darkSum+d, darkN+1
+		}
+	}
+	if float64(pubSum)/float64(pubN) >= float64(darkSum)/float64(darkN) {
+		t.Errorf("public lanes average %.1f hops out, unpublished %.1f", float64(pubSum)/float64(pubN), float64(darkSum)/float64(darkN))
+	}
+	share := len(u.PublicAtBigBang) * 100 / len(u.Lanes)
+	if share < 20 || share > 40 {
+		t.Errorf("%d%% of lanes public at creation; want a frontier, not a charted map or a blank one", share)
+	}
+}
+
 // At least one lane has no reverse.
 func TestOneWayLanesExist(t *testing.T) {
 	for _, u := range testUniverses(t) {

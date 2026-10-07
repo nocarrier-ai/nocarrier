@@ -87,13 +87,11 @@ func run() error {
 		return fmt.Errorf("jetstream: %w", err)
 	}
 
-	bigBang, sectorMap, err := ensureUniverse(ctx, js, cfg, log)
+	rep := newReporter(os.Stdout, !cfg.noColor && isTerminal(os.Stdout))
+	universeCreated, _, err := ensureUniverse(ctx, js, cfg, rep)
 	if err != nil {
 		return err
 	}
-	log.Info("universe", "tick_period", bigBang.TickPeriod.String(),
-		"sectors", sectorMap.Count(), "lanes", len(sectorMap.Lanes),
-		"ports", len(sectorMap.Ports), "spawn", sectorMap.Spawn)
 
 	active, err := projector.NewActiveSectors(ctx, js, log)
 	if err != nil {
@@ -112,7 +110,7 @@ func run() error {
 		return err
 	}
 	dispatcher := dispatch.New(js, active, dueAvatars, log)
-	pacer, err := clock.NewPacer(js, log, cfg.instanceID, bigBang.TickPeriod, dispatcher)
+	pacer, err := clock.NewPacer(js, log, cfg.instanceID, universeCreated.TickPeriod, dispatcher)
 	if err != nil {
 		return err
 	}
@@ -146,7 +144,7 @@ func run() error {
 // rather than their own. Only then is UniverseCreated appended, carrying the
 // seed of a map that is already durable, so there is never a moment where the
 // clock says a universe exists but its geography does not.
-func ensureUniverse(ctx context.Context, js jetstream.JetStream, cfg config, log *slog.Logger) (clock.UniverseCreated, *universe.Universe, error) {
+func ensureUniverse(ctx context.Context, js jetstream.JetStream, cfg config, rep reporter) (clock.UniverseCreated, *universe.Universe, error) {
 	fail := func(err error) (clock.UniverseCreated, *universe.Universe, error) {
 		return clock.UniverseCreated{}, nil, err
 	}
@@ -158,22 +156,22 @@ func ensureUniverse(ctx context.Context, js jetstream.JetStream, cfg config, log
 		return fail(err)
 	}
 
+	bigBang := false
 	stored, err := store.Load(ctx)
 	switch {
 	case err == nil:
 	case errors.Is(err, universe.ErrNoMap):
+		rep.bigBangStarting(cfg.sectors)
 		candidate, gerr := universe.Generate(time.Now().UnixNano(), cfg.sectors)
 		if gerr != nil {
 			return fail(fmt.Errorf("generate universe: %w", gerr))
 		}
 		switch cerr := store.Create(ctx, candidate); {
 		case cerr == nil:
-			log.Info("universe map created", "sectors", candidate.Count(),
-				"lanes", len(candidate.Lanes), "ports", len(candidate.Ports),
-				"map_version", candidate.Version)
+			bigBang = true
 			stored = candidate
 		case errors.Is(cerr, universe.ErrMapExists):
-			// Another instance won the big bang; its map is the real one.
+			rep.bigBangLost()
 			if stored, err = store.Load(ctx); err != nil {
 				return fail(fmt.Errorf("read the winning universe map: %w", err))
 			}
@@ -188,7 +186,10 @@ func ensureUniverse(ctx context.Context, js jetstream.JetStream, cfg config, log
 	_, err = streams.Append(ctx, js, streams.SubjectClock, u, 0)
 	switch {
 	case err == nil:
-		log.Info("universe created", "seed", u.Seed)
+		if !bigBang {
+			rep.bigBangInterrupted()
+		}
+		rep.universe(stored, u.TickPeriod, bigBang)
 		return u, stored, nil
 	case !errors.Is(err, streams.ErrConflict):
 		return fail(fmt.Errorf("create universe: %w", err))
@@ -212,6 +213,7 @@ func ensureUniverse(ctx context.Context, js jetstream.JetStream, cfg config, log
 		return fail(fmt.Errorf("clock says universe seed %d but the stored map is seed %d",
 			existing.Seed, stored.Seed))
 	}
+	rep.universe(stored, existing.TickPeriod, bigBang)
 	return existing, stored, nil
 }
 
@@ -250,10 +252,12 @@ type config struct {
 	httpAddr       string
 	logLevel       string
 	instanceID     string
+	noColor        bool
 }
 
 func loadConfig() (config, error) {
 	c := config{
+		noColor:        os.Getenv("NO_COLOR") != "",
 		natsURL:        envOr("NATS_URL", nats.DefaultURL),
 		natsCreds:      os.Getenv("NATS_CREDS"),
 		embeddedStore:  envOr("NOCARRIER_EMBEDDED_STORE", ".data/nats"),

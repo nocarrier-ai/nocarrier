@@ -25,9 +25,16 @@ const trunkReach = 16
 
 // Generation knobs. Constants until there is a universe to tune them against.
 const (
-	oneWayPercent            = 15 // share of eligible lanes made one-way
-	portPercent              = 33 // share of sectors with a port
-	regionalPublishedPercent = 90 // share of regional lanes public at creation
+	oneWayPercent = 15 // share of eligible lanes made one-way
+	portPercent   = 33 // share of sectors with a port
+)
+
+// A regional lane's chance of being public at creation falls with tree depth:
+// the area around a hub is charted, the frontier is not.
+const (
+	publicNearHubPercent = 80
+	publicDepthStep      = 10 // percent lost per tree hop from the hub
+	publicFloorPercent   = 10
 )
 
 func coreSize(n int) int { return max(4, min(10, n/8)) }
@@ -253,8 +260,8 @@ func (b *builder) growTree(hub int, members []int) {
 			admissible = inTree // all saturated; validate catches an over-cap sector
 		}
 		parent := admissible[b.rng.IntN(len(admissible))]
-		b.addTwoWay(parent, m, laneRegional, b.publishRegional())
 		b.depth[m] = b.depth[parent] + 1
+		b.addTwoWay(parent, m, laneRegional, b.publicAt(b.depth[m]))
 		treeAdj[parent] = append(treeAdj[parent], m)
 		treeAdj[m] = append(treeAdj[m], parent)
 		inTree = append(inTree, m)
@@ -272,7 +279,7 @@ func (b *builder) growTree(hub int, members []int) {
 		if b.degreeOf(a) >= laneCap || b.degreeOf(z) >= laneCap || b.joined(a, z) {
 			continue
 		}
-		b.addTwoWay(a, z, laneRegional, b.publishRegional())
+		b.addTwoWay(a, z, laneRegional, b.publicAt(max(b.depth[a], b.depth[z])))
 		added++
 	}
 }
@@ -679,8 +686,8 @@ func (b *builder) removeTwoWay(a, z int) {
 	b.takeLane(z, a)
 }
 
-func (b *builder) publishRegional() bool {
-	return b.rng.IntN(100) < regionalPublishedPercent
+func (b *builder) publicAt(depth int) bool {
+	return b.rng.IntN(100) < max(publicFloorPercent, publicNearHubPercent-publicDepthStep*depth)
 }
 
 func (b *builder) graph() *graph {
