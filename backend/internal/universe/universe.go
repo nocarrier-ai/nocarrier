@@ -36,8 +36,9 @@ const (
 	FuelOre Commodity = iota
 	Organics
 	Equipment
-	commodityCount
 )
+
+var commodities = [...]Commodity{FuelOre, Organics, Equipment}
 
 // Good is a port's terms for one commodity. Stock is runtime state on the
 // port aggregate, not here.
@@ -47,10 +48,13 @@ type Good struct {
 	Regen    int  // per tick, toward Capacity
 }
 
+// Goods holds a port's terms for every commodity, indexed by Commodity.
+type Goods [len(commodities)]Good
+
 // Port is a trading post. Every port trades all three commodities.
 type Port struct {
 	Sector int
-	Goods  [commodityCount]Good
+	Goods  Goods
 }
 
 // PlanetClass is TW2002's planet type. What a class does — production per

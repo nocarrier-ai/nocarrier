@@ -149,7 +149,7 @@ type builder struct {
 
 	lanes   []workLane
 	hasPort []bool
-	goods   [][commodityCount]Good
+	goods   []Goods
 	planets []Planet
 }
 
@@ -160,7 +160,7 @@ func newBuilder(seed int64, attempt, n int) *builder {
 		kind:    make([]sectorKind, n),
 		depth:   make([]int, n),
 		hasPort: make([]bool, n),
-		goods:   make([][commodityCount]Good, n),
+		goods:   make([]Goods, n),
 	}
 }
 
@@ -439,7 +439,7 @@ func (b *builder) assignStances() {
 			continue
 		}
 		raw := sellRawBase + sellRawSlope*b.depth[i]/treeDepthBound
-		for c := range commodityCount {
+		for _, c := range commodities {
 			pct := raw
 			if c == Equipment {
 				pct = 100 - raw
@@ -461,7 +461,7 @@ func (b *builder) plantShortcuts() {
 	want := shortcutCount(b.n)
 	planted := 0
 	for attempt := 0; attempt < want*20 && planted < want; attempt++ {
-		c := Commodity(b.rng.IntN(int(commodityCount)))
+		c := commodities[b.rng.IntN(len(commodities))]
 		var sellers, buyers []int
 		for i := range b.n {
 			if !b.hasPort[i] {

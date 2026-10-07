@@ -212,7 +212,7 @@ func (u *Universe) checkShortcutsExist() error {
 	public := u.publicAdjacency()
 	target := shortcutCount(len(u.Sectors))
 	found := 0
-	for c := range commodityCount {
+	for _, c := range commodities {
 		var sellers, buyers []int
 		for _, p := range u.Ports {
 			if p.Goods[c].Sells {

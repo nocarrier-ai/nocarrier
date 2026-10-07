@@ -193,7 +193,7 @@ func chainUniverse(n int) *Universe {
 	}
 	slices.SortFunc(u.Lanes, cmpLane)
 	u.PublicAtBigBang = slices.Clone(u.Lanes)
-	var goods [commodityCount]Good
+	var goods Goods
 	for c := range goods {
 		goods[c] = Good{Sells: true, Capacity: 1000, Regen: 5}
 	}
