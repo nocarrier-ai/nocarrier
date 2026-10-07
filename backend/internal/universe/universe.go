@@ -53,8 +53,34 @@ type Port struct {
 	Goods  [commodityCount]Good
 }
 
+// PlanetClass is TW2002's planet type. What a class does — production per
+// colonist, maximum population, habitability — is the planet aggregate's
+// table, not stored here.
+type PlanetClass uint8
+
+const (
+	ClassM PlanetClass = iota // Earth-like
+	ClassK                    // desert
+	ClassO                    // oceanic
+	ClassL                    // mountainous
+	ClassC                    // glacial
+	ClassH                    // volcanic
+	ClassU                    // gaseous
+	planetClassCount
+)
+
+// Planet is a colonisable world. Up to maxPlanetsPerSector share a sector.
+type Planet struct {
+	Sector int
+	Class  PlanetClass
+	// InitialColonists is the population at creation. Zero for almost every
+	// planet; a handful start with a small colony, and Terra at the spawn is
+	// the colonist source. The planet aggregate's runtime count starts here.
+	InitialColonists int
+}
+
 // Universe is the generated map. Lanes and PublicAtBigBang are sorted by
-// (From, To) and Ports by Sector, so the value is canonical.
+// (From, To), Ports and Planets by Sector, so the value is canonical.
 type Universe struct {
 	Version int
 	Seed    int64
@@ -63,6 +89,7 @@ type Universe struct {
 	Sectors []Sector
 	Lanes   []Lane
 	Ports   []Port
+	Planets []Planet
 	// PublicAtBigBang is the subset of Lanes that were common knowledge at
 	// creation. The current public map is a projection seeded from it.
 	PublicAtBigBang []Lane

@@ -350,7 +350,7 @@ dramatically change prices throughout the entire universe.
 
 ## The big bang algorithm
 
-Four passes. Each pass states the invariant it must not break.
+Five passes. Each pass states the invariant it must not break.
 
 ### Pass 1 — Skeleton
 
@@ -384,11 +384,6 @@ This pass makes the map feel like TW2002 instead of a road atlas.
    one unpublished one-way lane out to a different one. Absent from the public
    map, findable only by scanning the single neighbour that leads in — and, per
    the scanning rule, always escapable once you are inside.
-4. **Planets.** Place colonisable planets, weighted toward the periphery and
-   heavily toward pockets. A pocket with a planet and no port is the thing
-   players will hunt for: somewhere to build a colony or their own port where
-   nobody will find it.
-
 _Invariant: the graph is strongly connected. Every sector can reach every other
 sector._
 
@@ -409,7 +404,25 @@ rather than a check plus an exceptions list.
 _Invariant: at least K seller-to-buyer routes are shorter over all lanes than
 over public lanes by `shortcutGain` hops or more._
 
-### Pass 4 — Validate, or reseed
+### Pass 4 — Planets
+
+1. **Terra.** A class M planet at the spawn, the colonist source.
+2. **Placement.** Scatter the rest weighted toward tree depth and heavily toward
+   pockets, never in the core. Planets cluster: some placements deliberately
+   land where one already is. Up to three per sector; a second is uncommon and
+   a third is rare. A pocket with a planet and no port is the thing players
+   hunt for.
+3. **Class.** Roll one of TW2002's seven: M, K, O, L, C, H, U. What a class
+   does — production per colonist, maximum population, habitability — is the
+   planet aggregate's table, not the map's.
+4. **Seeded colonies.** A very small number of planets start with a small
+   colony. Every other colony is player-made.
+
+Nothing else about a planet is stored. Colonists, what they produce,
+stockpiles, ownership and citadels are runtime state on the planet aggregate,
+which is also where Fuel Ore finally becomes a sink.
+
+### Pass 5 — Validate, or reseed
 
 Run every invariant. If any fails, do not repair the graph in place — derive a
 new sub-seed and generate again, recording the sub-seed that finally succeeded

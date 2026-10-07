@@ -18,6 +18,7 @@ func mutate(t *testing.T, change func(*Universe)) *Universe {
 		Sectors:         slices.Clone(src.Sectors),
 		Lanes:           slices.Clone(src.Lanes),
 		Ports:           slices.Clone(src.Ports),
+		Planets:         slices.Clone(src.Planets),
 		PublicAtBigBang: slices.Clone(src.PublicAtBigBang),
 	}
 	change(u)
@@ -71,6 +72,19 @@ func TestValidateRejects(t *testing.T) {
 		"no ports at all":         func(u *Universe) { u.Ports = nil },
 		"port with zero capacity": func(u *Universe) { u.Ports[0].Goods[FuelOre].Capacity = 0 },
 		"port with zero regen":    func(u *Universe) { u.Ports[0].Goods[Organics].Regen = 0 },
+		"planet in a sector that does not exist": func(u *Universe) {
+			u.Planets = append(u.Planets, Planet{Sector: 100000})
+		},
+		"planet with unknown class":      func(u *Universe) { u.Planets[0].Class = planetClassCount },
+		"planet with negative colonists": func(u *Universe) { u.Planets[0].InitialColonists = -1 },
+		"too many planets in one sector": func(u *Universe) {
+			for range maxPlanetsPerSector + 1 {
+				u.Planets = append(u.Planets, Planet{Sector: 30})
+			}
+		},
+		"no planet at the spawn": func(u *Universe) {
+			u.Planets = slices.DeleteFunc(u.Planets, func(p Planet) bool { return p.Sector == u.Spawn })
+		},
 	}
 	for label, change := range cases {
 		t.Run(label, func(t *testing.T) {

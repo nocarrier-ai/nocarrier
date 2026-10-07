@@ -50,8 +50,9 @@ func TestStoreCreateThenLoad(t *testing.T) {
 		t.Errorf("header loaded as %+v", back)
 	}
 	if !slices.Equal(back.Sectors, u.Sectors) || !slices.Equal(back.Lanes, u.Lanes) ||
-		!slices.Equal(back.Ports, u.Ports) || !slices.Equal(back.PublicAtBigBang, u.PublicAtBigBang) {
-		t.Error("sectors, lanes, ports or the public set changed in the round trip")
+		!slices.Equal(back.Ports, u.Ports) || !slices.Equal(back.Planets, u.Planets) ||
+		!slices.Equal(back.PublicAtBigBang, u.PublicAtBigBang) {
+		t.Error("sectors, lanes, ports, planets or the public set changed in the round trip")
 	}
 	// lookups are rebuilt on load
 	for _, sec := range u.Sectors {
@@ -197,6 +198,7 @@ func chainUniverse(n int) *Universe {
 		goods[c] = Good{Sells: true, Capacity: 1000, Regen: 5}
 	}
 	u.Ports = []Port{{Sector: 1, Goods: goods}, {Sector: 2, Goods: goods}}
+	u.Planets = []Planet{{Sector: 1, Class: ClassM, InitialColonists: terraColonists}}
 	u.index()
 	return u
 }

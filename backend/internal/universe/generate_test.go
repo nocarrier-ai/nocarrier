@@ -392,3 +392,134 @@ func TestPlantShortcutsAddsLanes(t *testing.T) {
 		t.Fatal("shortcuts broke soundness")
 	}
 }
+
+// Terra is the spawn's only planet and the only one in the core; it holds the
+// colonist source.
+func TestTerraAtSpawn(t *testing.T) {
+	for _, u := range testUniverses(t) {
+		var atSpawn []Planet
+		for _, p := range u.Planets {
+			if s, _ := u.Sector(p.Sector); s.Core && p.Sector != u.Spawn {
+				t.Errorf("%s: planet in core sector %d", name(u), p.Sector)
+			}
+			if p.Sector == u.Spawn {
+				atSpawn = append(atSpawn, p)
+			}
+		}
+		if len(atSpawn) != 1 || atSpawn[0].Class != ClassM || atSpawn[0].InitialColonists != terraColonists {
+			t.Errorf("%s: spawn planets = %+v", name(u), atSpawn)
+		}
+	}
+}
+
+// No sector exceeds the cap, and sectors with more planets are no more common.
+func TestPlanetsPerSectorTaperOff(t *testing.T) {
+	u, err := Generate(1, 1000)
+	if err != nil {
+		t.Fatal(err)
+	}
+	per := map[int]int{}
+	for _, p := range u.Planets {
+		per[p.Sector]++
+	}
+	with := [maxPlanetsPerSector + 2]int{}
+	for _, n := range per {
+		if n > maxPlanetsPerSector {
+			t.Fatalf("sector with %d planets", n)
+		}
+		with[n]++
+	}
+	if !(with[1] > with[2] && with[2] >= with[3]) {
+		t.Errorf("sectors with 1/2/3 planets: %d/%d/%d, want non-increasing", with[1], with[2], with[3])
+	}
+	// clustering makes doubles a feature, not a fluke
+	if with[2]*20 < with[1]+with[2]+with[3] {
+		t.Errorf("only %d of %d planet sectors hold two; clustering is not taking", with[2], with[1]+with[2]+with[3])
+	}
+}
+
+// Planet sectors sit deeper than average, and pockets hold planets far more
+// often than other sectors.
+func TestPlanetsFavourDepthAndPockets(t *testing.T) {
+	u, err := Generate(1, 1000)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dist := hopsFromAny(u.adjacency().out, []int{u.Spawn - 1})
+	hasPlanet := map[int]bool{}
+	for _, p := range u.Planets {
+		hasPlanet[p.Sector] = true
+	}
+	allSum, planetSum := 0, 0
+	for _, s := range u.Sectors {
+		allSum += dist[s.ID-1]
+		if hasPlanet[s.ID] {
+			planetSum += dist[s.ID-1]
+		}
+	}
+	if float64(planetSum)/float64(len(hasPlanet)) <= float64(allSum)/float64(len(u.Sectors)) {
+		t.Error("planet sectors are not deeper than average")
+	}
+
+	public := publicAtBigBang(u)
+	pockets, pocketsWith, others, othersWith := 0, 0, 0, 0
+	for _, s := range u.Sectors {
+		exits, inbound := u.Exits(s.ID), u.inboundFrom(s.ID)
+		pocket := len(exits) == 1 && len(inbound) == 1 && exits[0].To != inbound[0] &&
+			!public[exits[0]] && !public[Lane{From: inbound[0], To: s.ID}]
+		if pocket {
+			pockets++
+			if hasPlanet[s.ID] {
+				pocketsWith++
+			}
+		} else {
+			others++
+			if hasPlanet[s.ID] {
+				othersWith++
+			}
+		}
+	}
+	if pockets == 0 {
+		t.Fatal("no pockets to measure")
+	}
+	if float64(pocketsWith)/float64(pockets) <= float64(othersWith)/float64(others) {
+		t.Errorf("pockets with planets %d/%d, others %d/%d", pocketsWith, pockets, othersWith, others)
+	}
+}
+
+// A few planets start with a small colony; the rest are empty.
+func TestSeededColoniesAreFew(t *testing.T) {
+	for _, u := range testUniverses(t) {
+		seeded := 0
+		for _, p := range u.Planets {
+			if p.Sector == u.Spawn {
+				continue
+			}
+			if p.InitialColonists == 0 {
+				continue
+			}
+			if p.InitialColonists < colonyMin || p.InitialColonists > colonyMax {
+				t.Errorf("%s: colony of %d outside %d..%d", name(u), p.InitialColonists, colonyMin, colonyMax)
+			}
+			seeded++
+		}
+		if want := seededColonies(len(u.Sectors)); seeded != want {
+			t.Errorf("%s: %d seeded colonies, want %d", name(u), seeded, want)
+		}
+	}
+}
+
+// All seven classes appear in a large universe.
+func TestAllPlanetClassesAppear(t *testing.T) {
+	u, err := Generate(1, 1000)
+	if err != nil {
+		t.Fatal(err)
+	}
+	seen := map[PlanetClass]bool{}
+	for _, p := range u.Planets {
+		seen[p.Class] = true
+	}
+	if len(seen) != int(planetClassCount) {
+		t.Errorf("%d of %d planet classes present", len(seen), planetClassCount)
+	}
+}

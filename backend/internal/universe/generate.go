@@ -54,6 +54,23 @@ const (
 // lanes.
 func shortcutCount(n int) int { return max(2, n/100) }
 
+// Planet knobs.
+const (
+	maxPlanetsPerSector = 3
+	pocketPlanetWeight  = 4  // multiplier on a pocket's chance of a planet
+	clusterPercent      = 25 // chance a placement targets a sector that already has a planet
+	colonyMin           = 100
+	colonyMax           = 500
+	terraColonists      = 1_000_000
+)
+
+// extraPlanetPercent[k-1] is the chance a sector holding k planets takes one
+// more.
+var extraPlanetPercent = [maxPlanetsPerSector - 1]int{40, 5}
+
+func planetCount(n int) int    { return max(4, n/10) }
+func seededColonies(n int) int { return max(2, n/200) }
+
 // Generate builds a universe of sectors for seed. Deterministic. A bad result
 // is reseeded, not repaired.
 func Generate(seed int64, sectors int) (*Universe, error) {
@@ -126,6 +143,7 @@ type builder struct {
 	lanes   []workLane
 	hasPort []bool
 	goods   [][commodityCount]Good
+	planets []Planet
 }
 
 func newBuilder(seed int64, attempt, n int) *builder {
@@ -151,6 +169,7 @@ func generate(seed int64, attempt, n int) *Universe {
 	b.placePorts()
 	b.assignStances()
 	b.plantShortcuts()
+	b.placePlanets()
 
 	// Every mutating pass checks sound; asserted once more on the final set.
 	if !b.sound() {
@@ -500,6 +519,62 @@ func (b *builder) publicGraph() *graph {
 	return g
 }
 
+// placePlanets puts Terra at the spawn, then scatters planets weighted toward
+// tree depth and heavily toward pockets, never in the core. Some placements
+// deliberately target a sector that already has a planet, so planets cluster;
+// a sector takes an extra planet at extraPlanetPercent. A few planets start
+// with a small colony.
+func (b *builder) placePlanets() {
+	b.planets = append(b.planets, Planet{Sector: b.core[0], Class: ClassM, InitialColonists: terraColonists})
+
+	weights := make([]int, b.n)
+	total := 0
+	for i := range b.n {
+		if b.kind[i] == sectorCore {
+			continue
+		}
+		w := 1 + b.depth[i]
+		if b.kind[i] == sectorPocket {
+			w *= pocketPlanetWeight
+		}
+		weights[i] = w
+		total += w
+	}
+	count := make([]int, b.n)
+	placed := 0
+	for attempt := 0; placed < planetCount(b.n) && attempt < planetCount(b.n)*10; attempt++ {
+		i := -1
+		if b.rng.IntN(100) < clusterPercent {
+			var open []int
+			for j := range b.n {
+				if count[j] > 0 && count[j] < maxPlanetsPerSector {
+					open = append(open, j)
+				}
+			}
+			i = b.pick(open)
+		}
+		if i == -1 {
+			r := b.rng.IntN(total)
+			for i = 0; r >= weights[i]; i++ {
+				r -= weights[i]
+			}
+		}
+		if count[i] >= maxPlanetsPerSector {
+			continue
+		}
+		if count[i] > 0 && b.rng.IntN(100) >= extraPlanetPercent[count[i]-1] {
+			continue
+		}
+		b.planets = append(b.planets, Planet{Sector: i, Class: PlanetClass(b.rng.IntN(int(planetClassCount)))})
+		count[i]++
+		placed++
+	}
+
+	for _, i := range b.rng.Perm(len(b.planets) - 1)[:min(seededColonies(b.n), len(b.planets)-1)] {
+		b.planets[i+1].InitialColonists = colonyMin + b.rng.IntN(colonyMax-colonyMin+1)
+	}
+}
+
 // emit freezes the universe in canonical order. Kinds are not recorded.
 func (b *builder) emit(seed int64) *Universe {
 	u := &Universe{
@@ -522,8 +597,13 @@ func (b *builder) emit(seed int64) *Universe {
 			u.PublicAtBigBang = append(u.PublicAtBigBang, lane)
 		}
 	}
+	for _, p := range b.planets {
+		p.Sector++
+		u.Planets = append(u.Planets, p)
+	}
 	slices.SortFunc(u.Lanes, cmpLane)
 	slices.SortFunc(u.PublicAtBigBang, cmpLane)
+	slices.SortStableFunc(u.Planets, func(x, y Planet) int { return x.Sector - y.Sector })
 	u.index()
 	return u
 }

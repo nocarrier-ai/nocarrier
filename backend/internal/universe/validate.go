@@ -24,6 +24,7 @@ func (u *Universe) validate() error {
 		u.checkLaneCap,
 		u.checkSpurs,
 		u.checkPorts,
+		u.checkPlanets,
 	} {
 		if err := check(); err != nil {
 			return err
@@ -175,6 +176,31 @@ func (u *Universe) checkPorts() error {
 	}
 	if len(u.Ports) == 0 {
 		return fmt.Errorf("%w: universe has no ports", errInvalid)
+	}
+	return nil
+}
+
+// checkPlanets: references resolve, the per-sector cap holds, classes are
+// known, and the spawn has a planet for colonists to come from.
+func (u *Universe) checkPlanets() error {
+	per := make(map[int]int, len(u.Planets))
+	for _, p := range u.Planets {
+		if _, ok := u.Sector(p.Sector); !ok {
+			return fmt.Errorf("%w: planet in unknown sector %d", errInvalid, p.Sector)
+		}
+		if p.Class >= planetClassCount {
+			return fmt.Errorf("%w: planet in sector %d has class %d", errInvalid, p.Sector, p.Class)
+		}
+		if p.InitialColonists < 0 {
+			return fmt.Errorf("%w: planet in sector %d has %d colonists", errInvalid, p.Sector, p.InitialColonists)
+		}
+		per[p.Sector]++
+		if per[p.Sector] > maxPlanetsPerSector {
+			return fmt.Errorf("%w: sector %d has more than %d planets", errInvalid, p.Sector, maxPlanetsPerSector)
+		}
+	}
+	if per[u.Spawn] == 0 {
+		return fmt.Errorf("%w: spawn sector %d has no planet", errInvalid, u.Spawn)
 	}
 	return nil
 }
