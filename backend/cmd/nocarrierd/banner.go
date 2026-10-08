@@ -67,23 +67,23 @@ func (r reporter) bigBangLost() {
 	r.line("Status", r.label("another instance won the big bang; loading its universe"))
 }
 
-func (r reporter) bigBangInterrupted() {
-	r.line("Status", r.paint(ansiEvent, "completing an interrupted big bang: map existed, clock event did not"))
+func (r reporter) bigBangResuming() {
+	r.line("Status", r.paint(ansiEvent, "completing the big bang: map exists, clock event does not; rolling its ports and planets again from the stored seed"))
 }
 
-func (r reporter) universe(u *universe.Universe, tick time.Duration, bigBang bool) {
-	core, oneWay, seeded := universeCounts(u)
+func (r reporter) universe(u *universe.Universe, tick time.Duration, bigBang bool, ports, planets int) {
+	core, oneWay := universeCounts(u)
 	if !bigBang {
 		r.header("universe loaded")
 	}
 	r.line("Universe", r.kv("seed", u.Seed), r.kv("map v", u.Version), r.kv("tick", tick))
 	r.line("Sectors", r.value(u.SectorCount()), r.kv("core", core), r.kv("spawn", u.Spawn))
 	r.line("Lanes", r.value(len(u.Lanes)), r.kv("one-way", oneWay), r.kv("public", len(u.PublicAtBigBang)))
-	r.line("Ports", r.value(len(u.Ports)))
-	r.line("Planets", r.value(len(u.Planets)), r.kv("seeded colonies", seeded))
+	r.line("Ports", r.value(ports))
+	r.line("Planets", r.value(planets))
 }
 
-func universeCounts(u *universe.Universe) (core, oneWay, seeded int) {
+func universeCounts(u *universe.Universe) (core, oneWay int) {
 	for _, s := range u.Sectors {
 		if s.Core {
 			core++
@@ -98,10 +98,5 @@ func universeCounts(u *universe.Universe) (core, oneWay, seeded int) {
 			oneWay++
 		}
 	}
-	for _, p := range u.Planets {
-		if p.InitialColonists > 0 && p.Sector != u.Spawn {
-			seeded++
-		}
-	}
-	return core, oneWay, seeded
+	return core, oneWay
 }

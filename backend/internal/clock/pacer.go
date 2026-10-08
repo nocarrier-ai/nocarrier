@@ -13,6 +13,9 @@ import (
 	"github.com/nocarrier-ai/nocarrier/internal/streams"
 )
 
+// This needs the type field on the wire so it can be used as a discriminant
+// by non-Go consumers
+
 type UniverseCreated struct {
 	Type       string        `json:"type"` // UniverseCreated
 	TickPeriod time.Duration `json:"tick_period"`
@@ -132,7 +135,7 @@ func (p *Pacer) observe(o observed) {
 	p.isDriver = o.winnerID == p.instanceID
 }
 
-// armDuration is the heart of NTP-free pacing: the driver fires first, and
+// armDuration is the heart of clock-sync-free pacing: the driver fires first, and
 // standbys give it a head start plus jitter so at most a few instances race.
 func (p *Pacer) armDuration() time.Duration {
 	if p.isDriver {
@@ -184,6 +187,9 @@ func (p *Pacer) attempt(ctx context.Context) error {
 	}
 }
 
+// ErrNoClock: the universe has not been created yet.
+var ErrNoClock = errors.New("clock has no events")
+
 func CurrentTick(ctx context.Context, js jetstream.JetStream) (int64, error) {
 	var ev TickAdvanced
 	seq, err := streams.Last(ctx, js, streams.StreamClock, streams.SubjectClock, &ev)
@@ -191,7 +197,7 @@ func CurrentTick(ctx context.Context, js jetstream.JetStream) (int64, error) {
 		return 0, err
 	}
 	if seq == 0 {
-		return 0, errors.New("clock has no events")
+		return 0, ErrNoClock
 	}
 	if ev.Type != "TickAdvanced" {
 		return -1, nil
@@ -206,7 +212,7 @@ func (p *Pacer) readHead(ctx context.Context) (observed, error) {
 		return observed{}, err
 	}
 	if seq == 0 {
-		return observed{}, errors.New("clock has no events")
+		return observed{}, ErrNoClock
 	}
 	if ev.Type != "TickAdvanced" {
 		// Head is UniverseCreated: tick 0 hasn't happened yet.

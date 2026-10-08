@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"regexp"
+	"strconv"
 	"time"
 
 	"github.com/nats-io/nats.go/jetstream"
@@ -20,6 +21,7 @@ const (
 
 	SectorEvents   = "sector.*"
 	PortEvents     = "port.*"
+	PlanetEvents   = "planet.*"
 	AvatarEvents   = "avatar.*"
 	PlanEvents     = "plan.*"
 	DoctrineEvents = "doctrine.*"
@@ -45,8 +47,16 @@ var validID = regexp.MustCompile(`^[A-Za-z0-9_-]+$`)
 // building a subject.
 func ValidID(id string) bool { return validID.MatchString(id) }
 
+// Number parses an id that is a number, as sector and planet ids are. Only the
+// canonical spelling is accepted, so one thing cannot have two subjects.
+func Number(id string) (int, bool) {
+	n, err := strconv.Atoi(id)
+	return n, err == nil && n >= 1 && strconv.Itoa(n) == id
+}
+
 func SectorSubject(sectorID string) string    { return "sector." + sectorID }
 func PortSubject(sectorID string) string      { return "port." + sectorID }
+func PlanetSubject(planetID string) string    { return "planet." + planetID }
 func AvatarSubject(avatarID string) string    { return "avatar." + avatarID }
 func PlanSubject(avatarID string) string      { return "plan." + avatarID }
 func DoctrineSubject(avatarID string) string  { return "doctrine." + avatarID }
@@ -74,7 +84,7 @@ func Ensure(ctx context.Context, js jetstream.JetStream, replicas int, tickPerio
 		},
 		{
 			Name:        StreamEvents,
-			Subjects:    []string{SectorEvents, PortEvents, AvatarEvents, PlanEvents, DoctrineEvents},
+			Subjects:    []string{SectorEvents, PortEvents, PlanetEvents, AvatarEvents, PlanEvents, DoctrineEvents},
 			Storage:     jetstream.FileStorage,
 			Compression: jetstream.S2Compression,
 			Replicas:    replicas,

@@ -69,7 +69,7 @@ func NewHandler(js jetstream.JetStream) *Handler {
 }
 
 // Commission appends AdmiralCommissioned at the avatar's empty subject. The
-// guard is the uniqueness check: expecting last sequence 0 admits exactly one
+// guard is that expecting last sequence 0 admits exactly one
 // commission per avatar id, so a second attempt (or a concurrent duplicate
 // submit) is rejected rather than creating a second admiral. There is no read
 // first; the append decides.
@@ -84,9 +84,7 @@ func (h *Handler) Commission(ctx context.Context, cmd CommissionAdmiral) (Admira
 		return AdmiralCommissioned{}, fmt.Errorf("read tick: %w", err)
 	}
 	// CurrentTick reports -1 between UniverseCreated and the first
-	// TickAdvanced. Stamp tick 0 instead: this tick is what activates the
-	// home sector, and a negative one would make the dispatcher replay
-	// every tick from 0 on the admiral's first dispatch.
+	// TickAdvanced, so we stamp at a minimum of tick 0
 	tick = max(tick, 0)
 
 	ev := AdmiralCommissioned{

@@ -12,8 +12,8 @@ var errInvalid = errors.New("invalid universe")
 // errPoorlyShaped: sound, but no hub structure. Generate reseeds.
 var errPoorlyShaped = errors.New("poorly shaped universe")
 
-// validate checks structural integrity: references resolve, nobody is
-// stranded, the lane cap and spur rule hold. Runs on load. Does not judge
+// validate checks the map's structural integrity: references resolve, nobody
+// is stranded, the lane cap and spur rule hold. Runs on load. Does not judge
 // shape; see wellShaped.
 func (u *Universe) validate() error {
 	for _, check := range []func() error{
@@ -23,8 +23,6 @@ func (u *Universe) validate() error {
 		u.checkNobodyStranded,
 		u.checkLaneCap,
 		u.checkSpurs,
-		u.checkPorts,
-		u.checkPlanets,
 	} {
 		if err := check(); err != nil {
 			return err
@@ -33,12 +31,21 @@ func (u *Universe) validate() error {
 	return nil
 }
 
-// wellShaped checks generation quality. Run only by Generate.
-func (u *Universe) wellShaped() error {
-	if err := u.checkHubsEmerged(); err != nil {
+// validate checks the roster against the map. Run only by Generate: once
+// created, each port and planet is validated by its own aggregate.
+func (bb *BigBang) validate() error {
+	if err := bb.checkPorts(); err != nil {
 		return err
 	}
-	return u.checkShortcutsExist()
+	return bb.checkPlanets()
+}
+
+// wellShaped checks generation quality. Run only by Generate.
+func (bb *BigBang) wellShaped() error {
+	if err := bb.Map.checkHubsEmerged(); err != nil {
+		return err
+	}
+	return bb.checkShortcutsExist()
 }
 
 func (u *Universe) checkSectors() error {
@@ -157,36 +164,38 @@ func (u *Universe) checkSpurs() error {
 	return nil
 }
 
-func (u *Universe) checkPorts() error {
-	for i, p := range u.Ports {
-		if _, ok := u.Sector(p.Sector); !ok {
+// checkPorts: one port per sector, in order, every commodity on real terms,
+// and the spawn has one.
+func (bb *BigBang) checkPorts() error {
+	for i, p := range bb.Ports {
+		if _, ok := bb.Map.Sector(p.Sector); !ok {
 			return fmt.Errorf("%w: port in unknown sector %d", errInvalid, p.Sector)
 		}
-		if i > 0 && p.Sector <= u.Ports[i-1].Sector {
+		if i > 0 && p.Sector <= bb.Ports[i-1].Sector {
 			return fmt.Errorf("%w: ports out of order at sector %d", errInvalid, p.Sector)
 		}
-		for c, g := range p.Goods {
+		for c, g := range p.Commodities {
 			if g.Capacity <= 0 || g.Regen <= 0 {
 				return fmt.Errorf("%w: port %d commodity %d has capacity %d regen %d",
 					errInvalid, p.Sector, c, g.Capacity, g.Regen)
 			}
 		}
 	}
-	if len(u.Ports) == 0 {
-		return fmt.Errorf("%w: universe has no ports", errInvalid)
+	if !slices.ContainsFunc(bb.Ports, func(p Port) bool { return p.Sector == bb.Map.Spawn }) {
+		return fmt.Errorf("%w: spawn sector %d has no port", errInvalid, bb.Map.Spawn)
 	}
 	return nil
 }
 
 // checkPlanets: references resolve, the per-sector cap holds, classes are
 // known, and the spawn has a planet for colonists to come from.
-func (u *Universe) checkPlanets() error {
-	per := make(map[int]int, len(u.Planets))
-	for _, p := range u.Planets {
-		if _, ok := u.Sector(p.Sector); !ok {
+func (bb *BigBang) checkPlanets() error {
+	per := make(map[int]int, len(bb.Planets))
+	for _, p := range bb.Planets {
+		if _, ok := bb.Map.Sector(p.Sector); !ok {
 			return fmt.Errorf("%w: planet in unknown sector %d", errInvalid, p.Sector)
 		}
-		if p.Class >= planetClassCount {
+		if int(p.Class) >= len(PlanetClasses) {
 			return fmt.Errorf("%w: planet in sector %d has class %d", errInvalid, p.Sector, p.Class)
 		}
 		if p.InitialColonists < 0 {
@@ -197,23 +206,23 @@ func (u *Universe) checkPlanets() error {
 			return fmt.Errorf("%w: sector %d has more than %d planets", errInvalid, p.Sector, maxPlanetsPerSector)
 		}
 	}
-	if per[u.Spawn] == 0 {
-		return fmt.Errorf("%w: spawn sector %d has no planet", errInvalid, u.Spawn)
+	if per[bb.Map.Spawn] == 0 {
+		return fmt.Errorf("%w: spawn sector %d has no planet", errInvalid, bb.Map.Spawn)
 	}
 	return nil
 }
 
 // checkShortcutsExist: enough seller-to-buyer routes are shorter over all
 // lanes than over public ones.
-func (u *Universe) checkShortcutsExist() error {
-	all := u.adjacency()
-	public := u.publicAdjacency()
-	target := shortcutCount(len(u.Sectors))
+func (bb *BigBang) checkShortcutsExist() error {
+	all := bb.Map.adjacency()
+	public := bb.Map.publicAdjacency()
+	target := shortcutCount(len(bb.Map.Sectors))
 	found := 0
 	for _, c := range Commodities {
 		var sellers, buyers []int
-		for _, p := range u.Ports {
-			if p.Goods[c].Sells {
+		for _, p := range bb.Ports {
+			if p.Commodities[c].Sells {
 				sellers = append(sellers, p.Sector-1)
 			} else {
 				buyers = append(buyers, p.Sector-1)

@@ -80,28 +80,47 @@ func seededColonies(n int) int { return max(2, n/200) }
 
 // Generate builds a universe of sectors for the given seed. Deterministic.
 // A bad result indicates a new seed is required.
-func Generate(seed int64, sectors int) (*Universe, error) {
+func Generate(seed int64, sectors int) (*BigBang, error) {
 	if sectors < minSectors {
 		return nil, fmt.Errorf("universe needs at least %d sectors, got %d", minSectors, sectors)
 	}
 	var last error
 	for attempt := range maxAttempts {
-		u := generate(seed, attempt, sectors)
-		if u == nil {
+		bb := generate(seed, attempt, sectors)
+		if bb == nil {
 			last = fmt.Errorf("%w: final graph is not sound", errPoorlyShaped)
 			continue
 		}
-		if err := u.validate(); err != nil {
+		if err := bb.Map.validate(); err != nil {
 			last = err
 			continue
 		}
-		if err := u.wellShaped(); err != nil {
+		if err := bb.validate(); err != nil {
 			last = err
 			continue
 		}
-		return u, nil
+		if err := bb.wellShaped(); err != nil {
+			last = err
+			continue
+		}
+		return bb, nil
 	}
 	return nil, fmt.Errorf("no valid universe in %d attempts: %w", maxAttempts, last)
+}
+
+// Regenerate reproduces the big bang that built a stored map, for an instance
+// that has to finish creating its ports and planets. It fails if the generator
+// no longer produces that map.
+func Regenerate(stored *Universe) (*BigBang, error) {
+	bb, err := Generate(stored.Seed, stored.SectorCount())
+	if err != nil {
+		return nil, err
+	}
+	if !bb.Map.Equal(stored) {
+		return nil, fmt.Errorf("generator v%d no longer reproduces the stored map (v%d, seed %d)",
+			version, stored.Version, stored.Seed)
+	}
+	return bb, nil
 }
 
 // sectorKind and laneKind drive the passes and are not recorded in the map.
@@ -149,7 +168,7 @@ type builder struct {
 
 	lanes   []workLane
 	hasPort []bool
-	goods   []Goods
+	terms   []Terms
 	planets []Planet
 }
 
@@ -160,11 +179,11 @@ func newBuilder(seed int64, attempt, n int) *builder {
 		kind:    make([]sectorKind, n),
 		depth:   make([]int, n),
 		hasPort: make([]bool, n),
-		goods:   make([]Goods, n),
+		terms:   make([]Terms, n),
 	}
 }
 
-func generate(seed int64, attempt, n int) *Universe {
+func generate(seed int64, attempt, n int) *BigBang {
 	b := newBuilder(seed, attempt, n)
 
 	b.buildCore()
@@ -445,7 +464,7 @@ func (b *builder) assignStances() {
 				pct = 100 - raw
 			}
 			capacity := capacityMin + b.rng.IntN(capacityMax-capacityMin+1)
-			b.goods[i][c] = Good{
+			b.terms[i][c] = CommodityTerms{
 				Sells:    b.rng.IntN(100) < pct,
 				Capacity: capacity,
 				Regen:    max(1, capacity/regenDivisor),
@@ -467,7 +486,7 @@ func (b *builder) plantShortcuts() {
 			if !b.hasPort[i] {
 				continue
 			}
-			if b.goods[i][c].Sells {
+			if b.terms[i][c].Sells {
 				sellers = append(sellers, i)
 			} else {
 				buyers = append(buyers, i)
@@ -572,7 +591,7 @@ func (b *builder) placePlanets() {
 		if count[i] > 0 && b.rng.IntN(100) >= extraPlanetPercent[count[i]-1] {
 			continue
 		}
-		b.planets = append(b.planets, Planet{Sector: i, Class: PlanetClass(b.rng.IntN(int(planetClassCount)))})
+		b.planets = append(b.planets, Planet{Sector: i, Class: PlanetClasses[b.rng.IntN(len(PlanetClasses))]})
 		count[i]++
 		placed++
 	}
@@ -584,7 +603,7 @@ func (b *builder) placePlanets() {
 
 // emit freezes the universe in canonical order. The kinds and classes are discarded
 // because they are only used as hints during generation.
-func (b *builder) emit(seed int64) *Universe {
+func (b *builder) emit(seed int64) *BigBang {
 	u := &Universe{
 		Version: version,
 		Seed:    seed,
@@ -592,10 +611,11 @@ func (b *builder) emit(seed int64) *Universe {
 		Sectors: make([]Sector, b.n),
 		Lanes:   make([]Lane, 0, len(b.lanes)),
 	}
+	bb := &BigBang{Map: u}
 	for i := range b.n {
 		u.Sectors[i] = Sector{ID: i + 1, Core: b.kind[i] == sectorCore}
 		if b.hasPort[i] {
-			u.Ports = append(u.Ports, Port{Sector: i + 1, Goods: b.goods[i]})
+			bb.Ports = append(bb.Ports, Port{Sector: i + 1, Commodities: b.terms[i]})
 		}
 	}
 	for _, l := range b.lanes {
@@ -607,13 +627,13 @@ func (b *builder) emit(seed int64) *Universe {
 	}
 	for _, p := range b.planets {
 		p.Sector++
-		u.Planets = append(u.Planets, p)
+		bb.Planets = append(bb.Planets, p)
 	}
 	slices.SortFunc(u.Lanes, cmpLane)
 	slices.SortFunc(u.PublicAtBigBang, cmpLane)
-	slices.SortStableFunc(u.Planets, func(x, y Planet) int { return x.Sector - y.Sector })
+	slices.SortStableFunc(bb.Planets, func(x, y Planet) int { return x.Sector - y.Sector })
 	u.index()
-	return u
+	return bb
 }
 
 func cmpLane(x, y Lane) int {

@@ -1,6 +1,9 @@
 // Package dispatch fans a won tick out as commands: one execute command per
 // active sector, one decide command per avatar that is due. Commands carry
 // deterministic Nats-Msg-Ids so re-dispatch after a crash is deduplicated.
+// Note that this kind of dispatch is only done for commands that need to be issued
+// as part of the tick itself. Other aggregates do their own command-to-event
+// pipelining.
 package dispatch
 
 import (

@@ -18,6 +18,7 @@ func TestSubjectsRouteToStreams(t *testing.T) {
 		{streams.SubjectClock, streams.StreamClock},
 		{streams.SectorSubject("s1"), streams.StreamEvents},
 		{streams.PortSubject("7"), streams.StreamEvents},
+		{streams.PlanetSubject("1"), streams.StreamEvents},
 		{streams.AvatarSubject("a1"), streams.StreamEvents},
 		{streams.PlanSubject("a1"), streams.StreamEvents},
 		{streams.DoctrineSubject("a1"), streams.StreamEvents},
@@ -96,5 +97,18 @@ func TestMsgIDs(t *testing.T) {
 	}
 	if got := streams.DecideMsgID("a1", 7); got != "a1@7" {
 		t.Errorf("DecideMsgID = %q", got)
+	}
+}
+
+func TestNumber(t *testing.T) {
+	for id, want := range map[string]int{"1": 1, "42": 42, "1000": 1000} {
+		if n, ok := streams.Number(id); !ok || n != want {
+			t.Errorf("Number(%q) = %d, %v; want %d", id, n, ok, want)
+		}
+	}
+	for _, id := range []string{"", "0", "-1", "+5", "05", "4.2", "hub", " 7", "1e3"} {
+		if _, ok := streams.Number(id); ok {
+			t.Errorf("Number(%q) accepted", id)
+		}
 	}
 }

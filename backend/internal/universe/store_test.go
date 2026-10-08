@@ -34,10 +34,7 @@ func TestStoreLoadBeforeTheBigBang(t *testing.T) {
 func TestStoreCreateThenLoad(t *testing.T) {
 	s, _ := startStore(t)
 	ctx := natstest.Context(t)
-	u, err := Generate(11, 200)
-	if err != nil {
-		t.Fatal(err)
-	}
+	u := generateMap(t, 11, 200)
 	if err := s.Create(ctx, u); err != nil {
 		t.Fatalf("create: %v", err)
 	}
@@ -49,18 +46,13 @@ func TestStoreCreateThenLoad(t *testing.T) {
 	if back.Version != u.Version || back.Seed != u.Seed || back.Spawn != u.Spawn {
 		t.Errorf("header loaded as %+v", back)
 	}
-	if !slices.Equal(back.Sectors, u.Sectors) || !slices.Equal(back.Lanes, u.Lanes) ||
-		!slices.Equal(back.Ports, u.Ports) || !slices.Equal(back.Planets, u.Planets) ||
-		!slices.Equal(back.PublicAtBigBang, u.PublicAtBigBang) {
-		t.Error("sectors, lanes, ports, planets or the public set changed in the round trip")
+	if !back.Equal(u) {
+		t.Error("sectors, lanes or the public set changed in the round trip")
 	}
 	// lookups are rebuilt on load
 	for _, sec := range u.Sectors {
 		if !slices.Equal(back.ExitsFromSector(sec.ID), u.ExitsFromSector(sec.ID)) {
 			t.Fatalf("exits of %d differ after load", sec.ID)
-		}
-		if back.HasPort(sec.ID) != u.HasPort(sec.ID) {
-			t.Fatalf("port of %d differs after load", sec.ID)
 		}
 	}
 }
@@ -69,14 +61,8 @@ func TestStoreCreateThenLoad(t *testing.T) {
 func TestStoreCreateIsOnce(t *testing.T) {
 	s, _ := startStore(t)
 	ctx := natstest.Context(t)
-	first, err := Generate(1, 200)
-	if err != nil {
-		t.Fatal(err)
-	}
-	second, err := Generate(2, 200)
-	if err != nil {
-		t.Fatal(err)
-	}
+	first := generateMap(t, 1, 200)
+	second := generateMap(t, 2, 200)
 	if err := s.Create(ctx, first); err != nil {
 		t.Fatalf("first create: %v", err)
 	}
@@ -100,11 +86,7 @@ func TestStoreCreateRacesSafely(t *testing.T) {
 
 	maps := make([]*Universe, instances)
 	for i := range instances {
-		u, err := Generate(int64(i+1), 100)
-		if err != nil {
-			t.Fatal(err)
-		}
-		maps[i] = u
+		maps[i] = generateMap(t, int64(i+1), 100)
 	}
 
 	errs := make([]error, instances)
@@ -143,9 +125,9 @@ func TestStoreCreateRacesSafely(t *testing.T) {
 func TestStoreLoadRejectsAnInvalidMap(t *testing.T) {
 	s, js := startStore(t)
 	ctx := natstest.Context(t)
-	broken := mutate(t, func(u *Universe) {
-		u.Lanes = slices.DeleteFunc(u.Lanes, func(l Lane) bool { return l.From == 40 })
-	})
+	broken := mutate(t, func(bb *BigBang) {
+		bb.Map.Lanes = slices.DeleteFunc(bb.Map.Lanes, func(l Lane) bool { return l.From == 40 })
+	}).Map
 	data, err := encode(broken)
 	if err != nil {
 		t.Fatal(err)
@@ -193,12 +175,6 @@ func chainUniverse(n int) *Universe {
 	}
 	slices.SortFunc(u.Lanes, cmpLane)
 	u.PublicAtBigBang = slices.Clone(u.Lanes)
-	var goods Goods
-	for c := range goods {
-		goods[c] = Good{Sells: true, Capacity: 1000, Regen: 5}
-	}
-	u.Ports = []Port{{Sector: 1, Goods: goods}, {Sector: 2, Goods: goods}}
-	u.Planets = []Planet{{Sector: 1, Class: ClassM, InitialColonists: terraColonists}}
 	u.index()
 	return u
 }
@@ -209,7 +185,7 @@ func TestStoreLoadAcceptsASoundButPoorlyShapedMap(t *testing.T) {
 	if err := u.validate(); err != nil {
 		t.Fatalf("chain should be structurally sound: %v", err)
 	}
-	if err := u.wellShaped(); err == nil {
+	if err := (&BigBang{Map: u}).wellShaped(); err == nil {
 		t.Fatal("chain should fail the quality gate; the test proves nothing otherwise")
 	}
 
@@ -229,9 +205,9 @@ func TestStoreLoadAcceptsASoundButPoorlyShapedMap(t *testing.T) {
 
 // Everything Generate returns passes wellShaped.
 func TestGenerateRequiresGoodShape(t *testing.T) {
-	for _, u := range testUniverses(t) {
-		if err := u.wellShaped(); err != nil {
-			t.Errorf("%s: %v", name(u), err)
+	for _, bb := range testBigBangs(t) {
+		if err := bb.wellShaped(); err != nil {
+			t.Errorf("%s: %v", name(bb.Map), err)
 		}
 	}
 }

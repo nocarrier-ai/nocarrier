@@ -2,14 +2,15 @@
 // pure function of a seed. The result is stored and loaded by every
 // instance.
 //
-// The map holds only what is true in the world and never changes: sectors,
-// which of them are protected space, lanes, ports, and which lanes were public
-// at creation. Hubs, trunk, regions and pockets are generator vocabulary and
-// are not recorded. See docs/game/universe.md.
+// The map holds only what no aggregate owns and what never changes: sectors,
+// which of them are protected space, lanes, and which lanes were public at
+// creation. Ports and planets are aggregates: Generate rolls them beside the
+// map, the big bang creates each one with a command, and from then on its
+// facts live on its own subject. Hubs, trunk, regions and pockets are
+// generator vocabulary and are not recorded. See docs/game/universe.md.
 package universe
 
 import (
-	"cmp"
 	"fmt"
 	"slices"
 )
@@ -34,7 +35,7 @@ type Lane struct {
 	To   int
 }
 
-// Commodity indexes a port's Goods.
+// Commodity indexes a port's Terms.
 type Commodity uint8
 
 const (
@@ -59,21 +60,22 @@ func (c Commodity) String() string {
 	return fmt.Sprintf("Commodity(%d)", uint8(c))
 }
 
-// Good is a port's terms for one commodity. Stock is runtime state on the
-// port aggregate.
-type Good struct {
-	Sells    bool // sells to ships; otherwise buys from them
-	Capacity int  // TW2002's max
-	Regen    int  // per tick, toward Capacity
+// CommodityTerms is how a port trades one commodity, as rolled at the big
+// bang.
+type CommodityTerms struct {
+	Sells    bool `json:"sells"`    // sells to ships; otherwise buys from them
+	Capacity int  `json:"capacity"` // TW2002's max
+	Regen    int  `json:"regen"`    // per tick, toward Capacity
 }
 
-// Goods holds a port's terms for every commodity, indexed by Commodity.
-type Goods [len(Commodities)]Good
+// Terms is a port's CommodityTerms for every commodity, indexed by Commodity.
+type Terms [len(Commodities)]CommodityTerms
 
-// Port is a trading post. Every port trades all three commodities.
+// Port is a trading post to create at the big bang. Every port trades all
+// three commodities.
 type Port struct {
-	Sector int
-	Goods  Goods
+	Sector      int
+	Commodities Terms
 }
 
 // PlanetClass is TW2002's planet type. What a class does — production per
@@ -89,21 +91,24 @@ const (
 	ClassC                    // glacial
 	ClassH                    // volcanic
 	ClassU                    // gaseous
-	planetClassCount
 )
 
-// Planet is a colonisable world. Up to maxPlanetsPerSector share a sector.
+// PlanetClasses lists every class, in index order.
+var PlanetClasses = [...]PlanetClass{ClassM, ClassK, ClassO, ClassL, ClassC, ClassH, ClassU}
+
+// Planet is a colonisable world to create at the big bang. Up to
+// maxPlanetsPerSector share a sector.
 type Planet struct {
 	Sector int
 	Class  PlanetClass
 	// InitialColonists is the population at creation. Zero for almost every
 	// planet; a handful start with a small colony, and Terra at the spawn is
-	// the colonist source. The planet aggregate's runtime count starts here.
+	// the colonist source.
 	InitialColonists int
 }
 
 // Universe is the generated map. Lanes and PublicAtBigBang are sorted by
-// (From, To), Ports and Planets by Sector, so the value is canonical.
+// (From, To), so the value is canonical.
 type Universe struct {
 	Version int
 	Seed    int64
@@ -111,14 +116,27 @@ type Universe struct {
 	Spawn   int
 	Sectors []Sector
 	Lanes   []Lane
-	Ports   []Port
-	Planets []Planet
 	// PublicAtBigBang is the subset of Lanes that were common knowledge at
 	// creation. The current public map is a projection seeded from it.
 	PublicAtBigBang []Lane
 
-	exits  [][]int // indices into Lanes, by sector
-	portAt []bool
+	exits [][]int // indices into Lanes, by sector
+}
+
+// BigBang is what Generate produces: the map, stored once, and the ports and
+// planets to create, each becoming the first event on its own subject. Ports
+// and Planets are sorted by sector; a planet's ID is its position here, from 1.
+type BigBang struct {
+	Map     *Universe
+	Ports   []Port
+	Planets []Planet
+}
+
+// Equal reports whether two maps are the same universe.
+func (u *Universe) Equal(v *Universe) bool {
+	return u.Version == v.Version && u.Seed == v.Seed && u.Spawn == v.Spawn &&
+		slices.Equal(u.Sectors, v.Sectors) && slices.Equal(u.Lanes, v.Lanes) &&
+		slices.Equal(u.PublicAtBigBang, v.PublicAtBigBang)
 }
 
 // SectorCount returns the number of sectors.
@@ -144,23 +162,6 @@ func (u *Universe) Sector(sectorID int) (Sector, bool) {
 	return u.Sectors[sectorID-1], true
 }
 
-// PortInSector looks a sector's port up. Ports are sorted by sector.
-func (u *Universe) PortInSector(sectorID int) (Port, bool) {
-	i, ok := slices.BinarySearchFunc(u.Ports, sectorID, func(p Port, id int) int { return cmp.Compare(p.Sector, id) })
-	if !ok {
-		return Port{}, false
-	}
-	return u.Ports[i], true
-}
-
-// HasPort reports whether a sector holds a port.
-func (u *Universe) HasPort(sectorID int) bool {
-	if sectorID < 1 || sectorID > len(u.portAt) {
-		return false
-	}
-	return u.portAt[sectorID-1]
-}
-
 // index builds the lookups. Out-of-range references are skipped so a bad
 // stored map reaches validate instead of panicking.
 func (u *Universe) index() {
@@ -169,12 +170,6 @@ func (u *Universe) index() {
 	for i := range u.Lanes {
 		if from := u.Lanes[i].From; from >= 1 && from <= n {
 			u.exits[from-1] = append(u.exits[from-1], i)
-		}
-	}
-	u.portAt = make([]bool, n)
-	for _, p := range u.Ports {
-		if p.Sector >= 1 && p.Sector <= n {
-			u.portAt[p.Sector-1] = true
 		}
 	}
 }

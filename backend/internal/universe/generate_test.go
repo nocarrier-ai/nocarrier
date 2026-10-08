@@ -3,6 +3,7 @@ package universe
 import (
 	"encoding/json"
 	"fmt"
+	"slices"
 	"sync"
 	"testing"
 )
@@ -10,10 +11,29 @@ import (
 // testUniverses is generated once per package run.
 func testUniverses(t *testing.T) []*Universe {
 	t.Helper()
-	return sharedUniverses()
+	var out []*Universe
+	for _, bb := range sharedBigBangs() {
+		out = append(out, bb.Map)
+	}
+	return out
 }
 
-var sharedUniverses = sync.OnceValue(func() []*Universe {
+func testBigBangs(t *testing.T) []*BigBang {
+	t.Helper()
+	return sharedBigBangs()
+}
+
+// generateMap is Generate for tests that only want the map.
+func generateMap(t *testing.T, seed int64, sectors int) *Universe {
+	t.Helper()
+	bb, err := Generate(seed, sectors)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return bb.Map
+}
+
+var sharedBigBangs = sync.OnceValue(func() []*BigBang {
 	cases := []struct {
 		sectors int
 		seeds   []int64
@@ -22,14 +42,14 @@ var sharedUniverses = sync.OnceValue(func() []*Universe {
 		{200, []int64{1, 2, 3}},
 		{1000, []int64{1, 42}},
 	}
-	var out []*Universe
+	var out []*BigBang
 	for _, c := range cases {
 		for _, seed := range c.seeds {
-			u, err := Generate(seed, c.sectors)
+			bb, err := Generate(seed, c.sectors)
 			if err != nil {
 				panic(fmt.Sprintf("generate %d sectors seed %d: %v", c.sectors, seed, err))
 			}
-			out = append(out, u)
+			out = append(out, bb)
 		}
 	}
 	return out
@@ -230,10 +250,7 @@ func TestPublicationRules(t *testing.T) {
 // Public lanes sit nearer the spawn than unpublished ones: charted around the
 // hubs, dark at the frontier.
 func TestPublicMapThinsWithDepth(t *testing.T) {
-	u, err := Generate(1, 1000)
-	if err != nil {
-		t.Fatal(err)
-	}
+	u := generateMap(t, 1, 1000)
 	dist := hopsFromAny(u.adjacency().out, []int{u.Spawn - 1})
 	public := publicAtBigBang(u)
 	pubSum, pubN, darkSum, darkN := 0, 0, 0, 0
@@ -288,9 +305,11 @@ func TestCanonicalOrdering(t *testing.T) {
 				t.Fatalf("%s: public set out of order at %d", name(u), i)
 			}
 		}
-		for i := 1; i < len(u.Ports); i++ {
-			if u.Ports[i-1].Sector >= u.Ports[i].Sector {
-				t.Fatalf("%s: ports out of order at %d", name(u), i)
+	}
+	for _, bb := range testBigBangs(t) {
+		for i := 1; i < len(bb.Ports); i++ {
+			if bb.Ports[i-1].Sector >= bb.Ports[i].Sector {
+				t.Fatalf("%s: ports out of order at %d", name(bb.Map), i)
 			}
 		}
 	}
@@ -298,11 +317,11 @@ func TestCanonicalOrdering(t *testing.T) {
 
 // The port share lands near portPercent.
 func TestPortsRoughlyHitTarget(t *testing.T) {
-	for _, u := range testUniverses(t) {
-		got := len(u.Ports) * 100 / len(u.Sectors)
+	for _, bb := range testBigBangs(t) {
+		got := len(bb.Ports) * 100 / len(bb.Map.Sectors)
 		want := portPercent
 		if got < want-15 || got > want+20 {
-			t.Errorf("%s: %d%% of sectors have ports, want near %d%%", name(u), got, want)
+			t.Errorf("%s: %d%% of sectors have ports, want near %d%%", name(bb.Map), got, want)
 		}
 	}
 }
@@ -316,19 +335,13 @@ func TestRejectsTooSmallAUniverse(t *testing.T) {
 
 // Out-of-range IDs return zero values, not panics.
 func TestAccessorsOutOfRange(t *testing.T) {
-	u, err := Generate(1, 64)
-	if err != nil {
-		t.Fatal(err)
-	}
+	u := generateMap(t, 1, 64)
 	for _, id := range []int{-1, 0, len(u.Sectors) + 1} {
 		if _, ok := u.Sector(id); ok {
 			t.Errorf("Sector(%d) reported a hit", id)
 		}
 		if got := u.ExitsFromSector(id); got != nil {
 			t.Errorf("Exits(%d) = %v, want nil", id, got)
-		}
-		if u.HasPort(id) {
-			t.Errorf("HasPort(%d) = true", id)
 		}
 	}
 	if u.SectorCount() != len(u.Sectors) {
@@ -338,14 +351,14 @@ func TestAccessorsOutOfRange(t *testing.T) {
 
 // Every port trades all three commodities with capacity in range and regen set.
 func TestPortsTradeAllThreeCommodities(t *testing.T) {
-	for _, u := range testUniverses(t) {
-		for _, p := range u.Ports {
-			for c, g := range p.Goods {
+	for _, bb := range testBigBangs(t) {
+		for _, p := range bb.Ports {
+			for c, g := range p.Commodities {
 				if g.Capacity < capacityMin || g.Capacity > capacityMax {
-					t.Errorf("%s: port %d commodity %d capacity %d", name(u), p.Sector, c, g.Capacity)
+					t.Errorf("%s: port %d commodity %d capacity %d", name(bb.Map), p.Sector, c, g.Capacity)
 				}
 				if g.Regen < 1 {
-					t.Errorf("%s: port %d commodity %d regen %d", name(u), p.Sector, c, g.Regen)
+					t.Errorf("%s: port %d commodity %d regen %d", name(bb.Map), p.Sector, c, g.Regen)
 				}
 			}
 		}
@@ -354,13 +367,13 @@ func TestPortsTradeAllThreeCommodities(t *testing.T) {
 
 // All eight buy/sell classes appear in a large universe.
 func TestAllPortClassesAppear(t *testing.T) {
-	u, err := Generate(1, 1000)
+	bb, err := Generate(1, 1000)
 	if err != nil {
 		t.Fatal(err)
 	}
 	seen := map[[3]bool]bool{}
-	for _, p := range u.Ports {
-		seen[[3]bool{p.Goods[FuelOre].Sells, p.Goods[Organics].Sells, p.Goods[Equipment].Sells}] = true
+	for _, p := range bb.Ports {
+		seen[[3]bool{p.Commodities[FuelOre].Sells, p.Commodities[Organics].Sells, p.Commodities[Equipment].Sells}] = true
 	}
 	if len(seen) != 8 {
 		t.Errorf("%d of 8 port classes present", len(seen))
@@ -370,15 +383,16 @@ func TestAllPortClassesAppear(t *testing.T) {
 // Fuel Ore sellers sit farther from the spawn than buyers on average, and
 // Equipment the reverse.
 func TestStancesLeanWithDistanceFromCore(t *testing.T) {
-	u, err := Generate(1, 1000)
+	bb, err := Generate(1, 1000)
 	if err != nil {
 		t.Fatal(err)
 	}
+	u := bb.Map
 	dist := hopsFromAny(u.adjacency().out, []int{u.Spawn - 1})
 	mean := func(c Commodity, sells bool) float64 {
 		sum, n := 0, 0
-		for _, p := range u.Ports {
-			if p.Goods[c].Sells == sells {
+		for _, p := range bb.Ports {
+			if p.Commodities[c].Sells == sells {
 				sum += dist[p.Sector-1]
 				n++
 			}
@@ -423,9 +437,10 @@ func TestPlantShortcutsAddsLanes(t *testing.T) {
 // Terra is the spawn's only planet and the only one in the core; it holds the
 // colonist source.
 func TestTerraAtSpawn(t *testing.T) {
-	for _, u := range testUniverses(t) {
+	for _, bb := range testBigBangs(t) {
+		u := bb.Map
 		var atSpawn []Planet
-		for _, p := range u.Planets {
+		for _, p := range bb.Planets {
 			if s, _ := u.Sector(p.Sector); s.Core && p.Sector != u.Spawn {
 				t.Errorf("%s: planet in core sector %d", name(u), p.Sector)
 			}
@@ -441,12 +456,12 @@ func TestTerraAtSpawn(t *testing.T) {
 
 // No sector exceeds the cap, and sectors with more planets are no more common.
 func TestPlanetsPerSectorTaperOff(t *testing.T) {
-	u, err := Generate(1, 1000)
+	bb, err := Generate(1, 1000)
 	if err != nil {
 		t.Fatal(err)
 	}
 	per := map[int]int{}
-	for _, p := range u.Planets {
+	for _, p := range bb.Planets {
 		per[p.Sector]++
 	}
 	with := [maxPlanetsPerSector + 2]int{}
@@ -468,13 +483,14 @@ func TestPlanetsPerSectorTaperOff(t *testing.T) {
 // Planet sectors sit deeper than average, and pockets hold planets far more
 // often than other sectors.
 func TestPlanetsFavourDepthAndPockets(t *testing.T) {
-	u, err := Generate(1, 1000)
+	bb, err := Generate(1, 1000)
 	if err != nil {
 		t.Fatal(err)
 	}
+	u := bb.Map
 	dist := hopsFromAny(u.adjacency().out, []int{u.Spawn - 1})
 	hasPlanet := map[int]bool{}
-	for _, p := range u.Planets {
+	for _, p := range bb.Planets {
 		hasPlanet[p.Sector] = true
 	}
 	allSum, planetSum := 0, 0
@@ -516,9 +532,10 @@ func TestPlanetsFavourDepthAndPockets(t *testing.T) {
 
 // A few planets start with a small colony; the rest are empty.
 func TestSeededColoniesAreFew(t *testing.T) {
-	for _, u := range testUniverses(t) {
+	for _, bb := range testBigBangs(t) {
+		u := bb.Map
 		seeded := 0
-		for _, p := range u.Planets {
+		for _, p := range bb.Planets {
 			if p.Sector == u.Spawn {
 				continue
 			}
@@ -538,15 +555,36 @@ func TestSeededColoniesAreFew(t *testing.T) {
 
 // All seven classes appear in a large universe.
 func TestAllPlanetClassesAppear(t *testing.T) {
-	u, err := Generate(1, 1000)
+	bb, err := Generate(1, 1000)
 	if err != nil {
 		t.Fatal(err)
 	}
 	seen := map[PlanetClass]bool{}
-	for _, p := range u.Planets {
+	for _, p := range bb.Planets {
 		seen[p.Class] = true
 	}
-	if len(seen) != int(planetClassCount) {
-		t.Errorf("%d of %d planet classes present", len(seen), planetClassCount)
+	if len(seen) != len(PlanetClasses) {
+		t.Errorf("%d of %d planet classes present", len(seen), len(PlanetClasses))
+	}
+}
+
+// Regenerate rebuilds the roster of a stored map from its seed.
+func TestRegenerateReproducesTheRoster(t *testing.T) {
+	bb, err := Generate(9, 200)
+	if err != nil {
+		t.Fatal(err)
+	}
+	again, err := Regenerate(bb.Map)
+	if err != nil {
+		t.Fatalf("regenerate: %v", err)
+	}
+	if !slices.Equal(again.Ports, bb.Ports) || !slices.Equal(again.Planets, bb.Planets) {
+		t.Error("regenerated roster differs")
+	}
+
+	other := generateMap(t, 10, 200)
+	other.Seed = 9
+	if _, err := Regenerate(other); err == nil {
+		t.Error("regenerate accepted a map the seed does not produce")
 	}
 }

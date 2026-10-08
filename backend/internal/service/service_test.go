@@ -408,7 +408,7 @@ func TestPortTradeReplies(t *testing.T) {
 		ShipID:    "s1",
 		Commodity: universe.Organics,
 		Units:     50,
-		Available: port.Available{1000, 1950, 3000},
+		State:     port.State{Available: port.Available{1000, 1950, 3000}},
 		Tick:      7,
 	}}
 	_, nc := startServices(t, &fakeUpdater{}, &fakeCommissioner{}, fake)
@@ -479,15 +479,16 @@ func TestPortTradeThroughHandler(t *testing.T) {
 	if _, err := streams.Append(ctx, js, streams.SubjectClock, clock.UniverseCreated{Type: "UniverseCreated"}, 0); err != nil {
 		t.Fatalf("universe: %v", err)
 	}
-	u := &universe.Universe{
-		Sectors: []universe.Sector{{ID: 1, Core: true}, {ID: 2}},
-		Ports: []universe.Port{{Sector: 1, Goods: universe.Goods{
-			{Sells: true, Capacity: 1000, Regen: 5},
-			{Sells: false, Capacity: 2000, Regen: 10},
-			{Sells: true, Capacity: 3000, Regen: 15},
-		}}},
+	u := &universe.Universe{Sectors: []universe.Sector{{ID: 1, Core: true}, {ID: 2}}}
+	ports := port.NewHandler(js, u)
+	if _, err := ports.Create(ctx, port.CreatePort{SectorID: "1", Commodities: universe.Terms{
+		{Sells: true, Capacity: 1000, Regen: 5},
+		{Sells: false, Capacity: 2000, Regen: 10},
+		{Sells: true, Capacity: 3000, Regen: 15},
+	}}); err != nil {
+		t.Fatalf("create port: %v", err)
 	}
-	natstest.Run(t, service.New(js.Conn(), natstest.Logger(), doctrine.NewHandler(js), avatar.NewHandler(js), port.NewHandler(js, u)))
+	natstest.Run(t, service.New(js.Conn(), natstest.Logger(), doctrine.NewHandler(js), avatar.NewHandler(js), ports))
 
 	msg := tradeJSON(t, js.Conn(), trade("1", "s1", universe.FuelOre, 100))
 	var reply service.PortTradeReply

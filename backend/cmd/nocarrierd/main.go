@@ -31,6 +31,7 @@ import (
 	"github.com/nocarrier-ai/nocarrier/internal/dispatch"
 	"github.com/nocarrier-ai/nocarrier/internal/doctrine"
 	"github.com/nocarrier-ai/nocarrier/internal/loop"
+	"github.com/nocarrier-ai/nocarrier/internal/planet"
 	"github.com/nocarrier-ai/nocarrier/internal/port"
 	"github.com/nocarrier-ai/nocarrier/internal/projector"
 	"github.com/nocarrier-ai/nocarrier/internal/sector"
@@ -110,7 +111,7 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	portStatus, err := projector.NewPortStatus(ctx, js, u)
+	portStatus, err := projector.NewPortStatus(ctx, js)
 	if err != nil {
 		return err
 	}
@@ -142,14 +143,16 @@ func run() error {
 }
 
 // ensureUniverse brings the universe into being, or finds the one that already
-// exists. Two things have to be created exactly once: the sector map and the
-// UniverseCreated event.
+// exists. The big bang is three steps, each done exactly once: store the map,
+// create every port and planet, append UniverseCreated.
 //
 // The map goes first. Its KV create is the election — concurrent instances all
 // generate a candidate, exactly one lands, and the losers read the winner's
-// rather than their own. Only then is UniverseCreated appended, carrying the
-// seed of a map that is already durable, so there is never a moment where the
-// clock says a universe exists but its geography does not.
+// rather than their own. Ports and planets come next, from the roster rolled
+// beside the map, each as the first event on its own subject. UniverseCreated
+// goes last, carrying the seed of a map that is already durable, so there is
+// never a moment where the clock says a universe exists but its geography does
+// not. Until it lands, any instance that finds the map completes the rest.
 func ensureUniverse(ctx context.Context, js jetstream.JetStream, cfg config, rep reporter) (clock.UniverseCreated, *universe.Universe, error) {
 	fail := func(err error) (clock.UniverseCreated, *universe.Universe, error) {
 		return clock.UniverseCreated{}, nil, err
@@ -162,22 +165,25 @@ func ensureUniverse(ctx context.Context, js jetstream.JetStream, cfg config, rep
 		return fail(err)
 	}
 
-	bigBang := false
+	var (
+		bb      *universe.BigBang // the roster, when this instance rolled the map
+		bigBang bool
+	)
 	stored, err := store.Load(ctx)
 	switch {
 	case err == nil:
 	case errors.Is(err, universe.ErrNoMap):
 		rep.bigBangStarting(cfg.sectors)
-		candidate, gerr := universe.Generate(time.Now().UnixNano(), cfg.sectors)
-		if gerr != nil {
-			return fail(fmt.Errorf("generate universe: %w", gerr))
+		if bb, err = universe.Generate(time.Now().UnixNano(), cfg.sectors); err != nil {
+			return fail(fmt.Errorf("generate universe: %w", err))
 		}
-		switch cerr := store.Create(ctx, candidate); {
+		switch cerr := store.Create(ctx, bb.Map); {
 		case cerr == nil:
 			bigBang = true
-			stored = candidate
+			stored = bb.Map
 		case errors.Is(cerr, universe.ErrMapExists):
 			rep.bigBangLost()
+			bb = nil
 			if stored, err = store.Load(ctx); err != nil {
 				return fail(fmt.Errorf("read the winning universe map: %w", err))
 			}
@@ -188,39 +194,120 @@ func ensureUniverse(ctx context.Context, js jetstream.JetStream, cfg config, rep
 		return fail(err)
 	}
 
-	u := clock.UniverseCreated{Type: "UniverseCreated", TickPeriod: cfg.tickPeriod, Seed: stored.Seed}
-	_, err = streams.Append(ctx, js, streams.SubjectClock, u, 0)
-	switch {
-	case err == nil:
-		if !bigBang {
-			rep.bigBangInterrupted()
-		}
-		rep.universe(stored, u.TickPeriod, bigBang)
-		return u, stored, nil
-	case !errors.Is(err, streams.ErrConflict):
-		return fail(fmt.Errorf("create universe: %w", err))
-	}
-	s, err := js.Stream(ctx, streams.StreamClock)
+	created, found, err := universeCreated(ctx, js)
 	if err != nil {
 		return fail(err)
 	}
-	first, err := s.GetMsg(ctx, 1)
-	if err != nil {
-		return fail(fmt.Errorf("read UniverseCreated: %w", err))
-	}
-	var existing clock.UniverseCreated
-	if err := json.Unmarshal(first.Data, &existing); err != nil || existing.Type != "UniverseCreated" {
-		return fail(errors.New("first clock event is not UniverseCreated"))
+	if !found {
+		if created, err = completeBigBang(ctx, js, cfg, rep, stored, bb); err != nil {
+			return fail(err)
+		}
 	}
 	// The clock and the map must agree about which universe this is. A
 	// mismatch means one of them was wiped independently, and starting anyway
 	// would move every ship.
-	if existing.Seed != stored.Seed {
+	if created.Seed != stored.Seed {
 		return fail(fmt.Errorf("clock says universe seed %d but the stored map is seed %d",
-			existing.Seed, stored.Seed))
+			created.Seed, stored.Seed))
 	}
-	rep.universe(stored, existing.TickPeriod, bigBang)
-	return existing, stored, nil
+	ports, err := subjectCount(ctx, js, streams.PortEvents)
+	if err != nil {
+		return fail(err)
+	}
+	planets, err := subjectCount(ctx, js, streams.PlanetEvents)
+	if err != nil {
+		return fail(err)
+	}
+	rep.universe(stored, created.TickPeriod, bigBang, ports, planets)
+	return created, stored, nil
+}
+
+// completeBigBang creates every port and planet in the roster, then appends
+// UniverseCreated. Every step is idempotent — a port or planet that exists is
+// skipped, and the clock append expects an empty subject — so an instance that
+// crashed part way, or several arriving together, converge on one universe.
+// An instance without the roster rolls it again from the stored seed.
+func completeBigBang(ctx context.Context, js jetstream.JetStream, cfg config, rep reporter, stored *universe.Universe, bb *universe.BigBang) (clock.UniverseCreated, error) {
+	if bb == nil {
+		rep.bigBangResuming()
+		var err error
+		if bb, err = universe.Regenerate(stored); err != nil {
+			return clock.UniverseCreated{}, fmt.Errorf("regenerate universe: %w", err)
+		}
+	}
+	ports := port.NewHandler(js, stored)
+	for _, p := range bb.Ports {
+		_, err := ports.Create(ctx, port.CreatePort{SectorID: strconv.Itoa(p.Sector), Commodities: p.Commodities})
+		if err != nil && !errors.Is(err, port.ErrAlreadyExists) {
+			return clock.UniverseCreated{}, fmt.Errorf("create port in sector %d: %w", p.Sector, err)
+		}
+	}
+	planets := planet.NewHandler(js, stored)
+	for i, p := range bb.Planets {
+		_, err := planets.Create(ctx, planet.CreatePlanet{
+			PlanetID:  strconv.Itoa(i + 1),
+			SectorID:  strconv.Itoa(p.Sector),
+			Class:     p.Class,
+			Colonists: p.InitialColonists,
+		})
+		if err != nil && !errors.Is(err, planet.ErrAlreadyExists) {
+			return clock.UniverseCreated{}, fmt.Errorf("create planet %d: %w", i+1, err)
+		}
+	}
+
+	u := clock.UniverseCreated{Type: "UniverseCreated", TickPeriod: cfg.tickPeriod, Seed: stored.Seed}
+	_, err := streams.Append(ctx, js, streams.SubjectClock, u, 0)
+	switch {
+	case err == nil:
+		return u, nil
+	case errors.Is(err, streams.ErrConflict):
+		// Another instance finished first.
+		existing, found, err := universeCreated(ctx, js)
+		if err != nil {
+			return clock.UniverseCreated{}, err
+		}
+		if !found {
+			return clock.UniverseCreated{}, errors.New("clock has events but no UniverseCreated")
+		}
+		return existing, nil
+	default:
+		return clock.UniverseCreated{}, fmt.Errorf("create universe: %w", err)
+	}
+}
+
+// universeCreated reads the clock's first event. Not found means the big bang
+// has not finished.
+func universeCreated(ctx context.Context, js jetstream.JetStream) (clock.UniverseCreated, bool, error) {
+	s, err := js.Stream(ctx, streams.StreamClock)
+	if err != nil {
+		return clock.UniverseCreated{}, false, err
+	}
+	first, err := s.GetMsg(ctx, 1)
+	if errors.Is(err, jetstream.ErrMsgNotFound) {
+		return clock.UniverseCreated{}, false, nil
+	}
+	if err != nil {
+		return clock.UniverseCreated{}, false, fmt.Errorf("read UniverseCreated: %w", err)
+	}
+	var existing clock.UniverseCreated
+	if err := json.Unmarshal(first.Data, &existing); err != nil || existing.Type != "UniverseCreated" {
+		return clock.UniverseCreated{}, false, errors.New("first clock event is not UniverseCreated")
+	}
+	return existing, true, nil
+}
+
+// subjectCount counts the aggregates of one kind: the subjects on EVENTS that
+// match the filter.
+func subjectCount(ctx context.Context, js jetstream.JetStream, filter string) (int, error) {
+	s, err := js.Stream(ctx, streams.StreamEvents)
+	if err != nil {
+		return 0, err
+	}
+	info, err := s.Info(ctx, jetstream.WithSubjectFilter(filter))
+	if err != nil {
+		return 0, fmt.Errorf("count %s: %w", filter, err)
+	}
+	return len(info.State.Subjects), nil
 }
 
 func startHealth(addr string, nc *nats.Conn, log *slog.Logger) *http.Server {
