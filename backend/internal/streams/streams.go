@@ -19,6 +19,7 @@ const (
 	SubjectClock = "clock.universe"
 
 	SectorEvents   = "sector.*"
+	PortEvents     = "port.*"
 	AvatarEvents   = "avatar.*"
 	PlanEvents     = "plan.*"
 	DoctrineEvents = "doctrine.*"
@@ -27,6 +28,7 @@ const (
 	BucketActive       = "active-sectors"
 	BucketDue          = "due-avatars"
 	BucketAvatarStatus = "avatar-status"
+	BucketPortStatus   = "port-status"
 	BucketLeaderboards = "leaderboards"
 	BucketDoctrine     = "doctrine"
 	// BucketUniverse holds the one packed sector map, written once at the big
@@ -44,6 +46,7 @@ var validID = regexp.MustCompile(`^[A-Za-z0-9_-]+$`)
 func ValidID(id string) bool { return validID.MatchString(id) }
 
 func SectorSubject(sectorID string) string    { return "sector." + sectorID }
+func PortSubject(sectorID string) string      { return "port." + sectorID }
 func AvatarSubject(avatarID string) string    { return "avatar." + avatarID }
 func PlanSubject(avatarID string) string      { return "plan." + avatarID }
 func DoctrineSubject(avatarID string) string  { return "doctrine." + avatarID }
@@ -71,7 +74,7 @@ func Ensure(ctx context.Context, js jetstream.JetStream, replicas int, tickPerio
 		},
 		{
 			Name:        StreamEvents,
-			Subjects:    []string{SectorEvents, AvatarEvents, PlanEvents, DoctrineEvents},
+			Subjects:    []string{SectorEvents, PortEvents, AvatarEvents, PlanEvents, DoctrineEvents},
 			Storage:     jetstream.FileStorage,
 			Compression: jetstream.S2Compression,
 			Replicas:    replicas,
@@ -108,7 +111,7 @@ func Ensure(ctx context.Context, js jetstream.JetStream, replicas int, tickPerio
 			return fmt.Errorf("stream %s: %w", cfg.Name, err)
 		}
 	}
-	for _, b := range []string{BucketSectorState, BucketActive, BucketDue, BucketAvatarStatus, BucketLeaderboards, BucketDoctrine, BucketUniverse} {
+	for _, b := range []string{BucketSectorState, BucketActive, BucketDue, BucketAvatarStatus, BucketPortStatus, BucketLeaderboards, BucketDoctrine, BucketUniverse} {
 		cfg := jetstream.KeyValueConfig{Bucket: b, Storage: jetstream.FileStorage, Replicas: replicas}
 		if _, err := js.CreateOrUpdateKeyValue(ctx, cfg); err != nil {
 			return fmt.Errorf("bucket %s: %w", b, err)

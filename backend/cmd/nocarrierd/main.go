@@ -31,6 +31,7 @@ import (
 	"github.com/nocarrier-ai/nocarrier/internal/dispatch"
 	"github.com/nocarrier-ai/nocarrier/internal/doctrine"
 	"github.com/nocarrier-ai/nocarrier/internal/loop"
+	"github.com/nocarrier-ai/nocarrier/internal/port"
 	"github.com/nocarrier-ai/nocarrier/internal/projector"
 	"github.com/nocarrier-ai/nocarrier/internal/sector"
 	"github.com/nocarrier-ai/nocarrier/internal/service"
@@ -88,7 +89,7 @@ func run() error {
 	}
 
 	rep := newReporter(os.Stdout, !cfg.noColor && isTerminal(os.Stdout))
-	universeCreated, _, err := ensureUniverse(ctx, js, cfg, rep)
+	universeCreated, u, err := ensureUniverse(ctx, js, cfg, rep)
 	if err != nil {
 		return err
 	}
@@ -109,6 +110,10 @@ func run() error {
 	if err != nil {
 		return err
 	}
+	portStatus, err := projector.NewPortStatus(ctx, js, u)
+	if err != nil {
+		return err
+	}
 	dispatcher := dispatch.New(js, active, dueAvatars, log)
 	pacer, err := clock.NewPacer(js, log, cfg.instanceID, universeCreated.TickPeriod, dispatcher)
 	if err != nil {
@@ -116,7 +121,7 @@ func run() error {
 	}
 	execPool := sector.NewPool(js, log, cfg.executeWorkers, toyResolver{})
 	decidePool := decide.NewPool(js, log, cfg.decideWorkers, notImplementedModel{})
-	services := service.New(nc, log, doctrine.NewHandler(js), avatar.NewHandler(js))
+	services := service.New(nc, log, doctrine.NewHandler(js), avatar.NewHandler(js), port.NewHandler(js, u))
 
 	health := startHealth(cfg.httpAddr, nc, log)
 	defer func() {
@@ -131,6 +136,7 @@ func run() error {
 		projector.NewLoop(js, log, doctrineProjection),
 		projector.NewLoop(js, log, avatarStatus),
 		projector.NewLoop(js, log, dueAvatars),
+		projector.NewLoop(js, log, portStatus),
 	}
 	return loop.Supervise(ctx, log, loops...)
 }
@@ -314,8 +320,15 @@ func newLogger(level, instanceID string) *slog.Logger {
 	if err := l.UnmarshalText([]byte(level)); err != nil {
 		l = slog.LevelInfo
 	}
-	return slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: l})).
-		With("instance", instanceID)
+	return slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{
+		Level: l,
+		ReplaceAttr: func(groups []string, a slog.Attr) slog.Attr {
+			if len(groups) == 0 && a.Key == slog.TimeKey {
+				return slog.String(a.Key, a.Value.Time().Format(time.TimeOnly))
+			}
+			return a
+		},
+	})).With("instance", instanceID)
 }
 
 func envOr(key, def string) string {

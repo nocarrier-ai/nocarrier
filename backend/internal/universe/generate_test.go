@@ -87,7 +87,7 @@ func TestNobodyIsStranded(t *testing.T) {
 			t.Errorf("%s: not strongly connected", name(u))
 		}
 		for _, s := range u.Sectors {
-			if len(u.Exits(s.ID)) == 0 {
+			if len(u.ExitsFromSector(s.ID)) == 0 {
 				t.Errorf("%s: sector %d has no way out", name(u), s.ID)
 			}
 		}
@@ -105,7 +105,7 @@ func TestSpursAreTwoWay(t *testing.T) {
 			}
 			spurs++
 			var out, back bool
-			for _, l := range u.Exits(s.ID) {
+			for _, l := range u.ExitsFromSector(s.ID) {
 				out = out || l.To == n[0]
 			}
 			for _, in := range u.inboundFrom(s.ID) {
@@ -134,7 +134,7 @@ func TestPocketsAreConcealedAndEscapable(t *testing.T) {
 	for _, u := range testUniverses(t) {
 		public := publicAtBigBang(u)
 		for _, s := range u.Sectors {
-			exits := u.Exits(s.ID)
+			exits := u.ExitsFromSector(s.ID)
 			inbound := u.inboundFrom(s.ID)
 			if len(exits) != 1 || len(inbound) != 1 || exits[0].To == inbound[0] {
 				continue
@@ -324,15 +324,15 @@ func TestAccessorsOutOfRange(t *testing.T) {
 		if _, ok := u.Sector(id); ok {
 			t.Errorf("Sector(%d) reported a hit", id)
 		}
-		if got := u.Exits(id); got != nil {
+		if got := u.ExitsFromSector(id); got != nil {
 			t.Errorf("Exits(%d) = %v, want nil", id, got)
 		}
 		if u.HasPort(id) {
 			t.Errorf("HasPort(%d) = true", id)
 		}
 	}
-	if u.Count() != len(u.Sectors) {
-		t.Errorf("Count = %d, want %d", u.Count(), len(u.Sectors))
+	if u.SectorCount() != len(u.Sectors) {
+		t.Errorf("Count = %d, want %d", u.SectorCount(), len(u.Sectors))
 	}
 }
 
@@ -415,7 +415,7 @@ func TestPlantShortcutsAddsLanes(t *testing.T) {
 	if added == 0 {
 		t.Fatal("no shortcuts planted")
 	}
-	if !b.sound() {
+	if !b.graphCorrect() {
 		t.Fatal("shortcuts broke soundness")
 	}
 }
@@ -491,7 +491,7 @@ func TestPlanetsFavourDepthAndPockets(t *testing.T) {
 	public := publicAtBigBang(u)
 	pockets, pocketsWith, others, othersWith := 0, 0, 0, 0
 	for _, s := range u.Sectors {
-		exits, inbound := u.Exits(s.ID), u.inboundFrom(s.ID)
+		exits, inbound := u.ExitsFromSector(s.ID), u.inboundFrom(s.ID)
 		pocket := len(exits) == 1 && len(inbound) == 1 && exits[0].To != inbound[0] &&
 			!public[exits[0]] && !public[Lane{From: inbound[0], To: s.ID}]
 		if pocket {

@@ -21,7 +21,8 @@ type DecideNow struct {
 }
 
 // PlanRevised carries an avatar's full new intent queue. The current plan is
-// the last PlanRevised plus completions recorded in TickResolved events.
+// the last PlanRevised less the intents since completed, each recorded by the
+// aggregate that executed it.
 type PlanRevised struct {
 	Type     string          `json:"type"` // PlanRevisedType
 	AvatarID string          `json:"avatar_id"`

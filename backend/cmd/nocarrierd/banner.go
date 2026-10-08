@@ -77,7 +77,7 @@ func (r reporter) universe(u *universe.Universe, tick time.Duration, bigBang boo
 		r.header("universe loaded")
 	}
 	r.line("Universe", r.kv("seed", u.Seed), r.kv("map v", u.Version), r.kv("tick", tick))
-	r.line("Sectors", r.value(u.Count()), r.kv("core", core), r.kv("spawn", u.Spawn))
+	r.line("Sectors", r.value(u.SectorCount()), r.kv("core", core), r.kv("spawn", u.Spawn))
 	r.line("Lanes", r.value(len(u.Lanes)), r.kv("one-way", oneWay), r.kv("public", len(u.PublicAtBigBang)))
 	r.line("Ports", r.value(len(u.Ports)))
 	r.line("Planets", r.value(len(u.Planets)), r.kv("seeded colonies", seeded))

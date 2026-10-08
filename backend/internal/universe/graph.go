@@ -1,5 +1,11 @@
 package universe
 
+// If you're wondering why there are graph traversal functions here
+// and not the use of a library, then wonder no more. There's only
+// 90-ish lines of code to do the small subset of graph functionality
+// needed. This isn't enough to violate my "no dependencies unless absolutely
+// necessary" rule.
+
 // graph is a directed adjacency over 0-based sector indices.
 type graph struct {
 	out [][]int
@@ -15,7 +21,7 @@ func (g *graph) add(from, to int) {
 	g.in[to] = append(g.in[to], from)
 }
 
-// stronglyConnected: one vertex reaches all and all reach it.
+// stronglyConnected indicates whether one vertex reaches all and all reach it.
 func (g *graph) stronglyConnected() bool {
 	n := len(g.out)
 	if n == 0 {

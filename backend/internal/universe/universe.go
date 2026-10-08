@@ -1,5 +1,5 @@
 // Package universe generates the sector map at the big bang. Generation is a
-// pure function of a seed, run once; the result is stored and loaded by every
+// pure function of a seed. The result is stored and loaded by every
 // instance.
 //
 // The map holds only what is true in the world and never changes: sectors,
@@ -7,6 +7,12 @@
 // at creation. Hubs, trunk, regions and pockets are generator vocabulary and
 // are not recorded. See docs/game/universe.md.
 package universe
+
+import (
+	"cmp"
+	"fmt"
+	"slices"
+)
 
 // version is which generator built a map. Provenance only.
 const version = 1
@@ -17,13 +23,12 @@ const laneCap = 6
 // Sector is a node. IDs start at 1; the core takes the lowest.
 type Sector struct {
 	ID int
-	// Core marks protected space. It does not imply a port.
+	// Core marks protected space.
 	Core bool
 }
 
-// Lane is a directed edge; a two-way lane is two records. Distance is hops.
-// Whether a lane is public changes over time and is not stored here; see
-// PublicAtBigBang.
+// Lane is a directed edge. 2-way lanes are represented with 2 records. Distance is hops,
+// so every lane transit is the same thematic distance.
 type Lane struct {
 	From int
 	To   int
@@ -38,10 +43,24 @@ const (
 	Equipment
 )
 
-var commodities = [...]Commodity{FuelOre, Organics, Equipment}
+// Commodities lists every commodity, in index order.
+var Commodities = [...]Commodity{FuelOre, Organics, Equipment}
+
+// String is the TW2002 name.
+func (c Commodity) String() string {
+	switch c {
+	case FuelOre:
+		return "Fuel Ore"
+	case Organics:
+		return "Organics"
+	case Equipment:
+		return "Equipment"
+	}
+	return fmt.Sprintf("Commodity(%d)", uint8(c))
+}
 
 // Good is a port's terms for one commodity. Stock is runtime state on the
-// port aggregate, not here.
+// port aggregate.
 type Good struct {
 	Sells    bool // sells to ships; otherwise buys from them
 	Capacity int  // TW2002's max
@@ -49,7 +68,7 @@ type Good struct {
 }
 
 // Goods holds a port's terms for every commodity, indexed by Commodity.
-type Goods [len(commodities)]Good
+type Goods [len(Commodities)]Good
 
 // Port is a trading post. Every port trades all three commodities.
 type Port struct {
@@ -102,11 +121,11 @@ type Universe struct {
 	portAt []bool
 }
 
-// Count returns the number of sectors.
-func (u *Universe) Count() int { return len(u.Sectors) }
+// SectorCount returns the number of sectors.
+func (u *Universe) SectorCount() int { return len(u.Sectors) }
 
-// Exits returns the lanes leaving a sector, in canonical order.
-func (u *Universe) Exits(sectorID int) []Lane {
+// ExitsFromSector returns the lanes leaving a sector, in canonical order.
+func (u *Universe) ExitsFromSector(sectorID int) []Lane {
 	if sectorID < 1 || sectorID > len(u.exits) {
 		return nil
 	}
@@ -123,6 +142,15 @@ func (u *Universe) Sector(sectorID int) (Sector, bool) {
 		return Sector{}, false
 	}
 	return u.Sectors[sectorID-1], true
+}
+
+// PortInSector looks a sector's port up. Ports are sorted by sector.
+func (u *Universe) PortInSector(sectorID int) (Port, bool) {
+	i, ok := slices.BinarySearchFunc(u.Ports, sectorID, func(p Port, id int) int { return cmp.Compare(p.Sector, id) })
+	if !ok {
+		return Port{}, false
+	}
+	return u.Ports[i], true
 }
 
 // HasPort reports whether a sector holds a port.

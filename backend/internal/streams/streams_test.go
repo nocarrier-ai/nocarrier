@@ -17,6 +17,7 @@ func TestSubjectsRouteToStreams(t *testing.T) {
 	}{
 		{streams.SubjectClock, streams.StreamClock},
 		{streams.SectorSubject("s1"), streams.StreamEvents},
+		{streams.PortSubject("7"), streams.StreamEvents},
 		{streams.AvatarSubject("a1"), streams.StreamEvents},
 		{streams.PlanSubject("a1"), streams.StreamEvents},
 		{streams.DoctrineSubject("a1"), streams.StreamEvents},

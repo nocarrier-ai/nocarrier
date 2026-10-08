@@ -69,6 +69,9 @@ func TestValidateRejects(t *testing.T) {
 		"two ports in one sector": func(u *Universe) {
 			u.Ports = append(u.Ports, Port{Sector: u.Ports[0].Sector})
 		},
+		"ports out of order": func(u *Universe) {
+			u.Ports[0], u.Ports[1] = u.Ports[1], u.Ports[0]
+		},
 		"no ports at all":         func(u *Universe) { u.Ports = nil },
 		"port with zero capacity": func(u *Universe) { u.Ports[0].Goods[FuelOre].Capacity = 0 },
 		"port with zero regen":    func(u *Universe) { u.Ports[0].Goods[Organics].Regen = 0 },

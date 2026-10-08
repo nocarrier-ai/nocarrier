@@ -56,9 +56,8 @@ func (s *Store) Load(ctx context.Context) (*Universe, error) {
 	return u, nil
 }
 
-// Create stores a map only if none exists; the KV create is the big-bang
-// election. Called before UniverseCreated is appended, so the event names a
-// map that is already durable.
+// Create stores a map only if none exists. The KV create is the big-bang
+// "leader" election. Called before UniverseCreated is appended.
 func (s *Store) Create(ctx context.Context, u *Universe) error {
 	data, err := encode(u)
 	if err != nil {

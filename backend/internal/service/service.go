@@ -16,7 +16,9 @@ import (
 
 	"github.com/nocarrier-ai/nocarrier/internal/avatar"
 	"github.com/nocarrier-ai/nocarrier/internal/doctrine"
+	"github.com/nocarrier-ai/nocarrier/internal/port"
 	"github.com/nocarrier-ai/nocarrier/internal/streams"
+	"github.com/nocarrier-ai/nocarrier/internal/universe"
 )
 
 const requestTimeout = 5 * time.Second
@@ -27,6 +29,10 @@ type DoctrineUpdater interface {
 
 type AdmiralCommissioner interface {
 	Commission(ctx context.Context, cmd avatar.CommissionAdmiral) (avatar.AdmiralCommissioned, error)
+}
+
+type PortTrader interface {
+	Trade(ctx context.Context, cmd port.Trade) (port.TradeCompleted, error)
 }
 
 type DoctrineUpdateReply struct {
@@ -44,15 +50,27 @@ type AvatarCommissionReply struct {
 	Tick       int64  `json:"tick"`
 }
 
+// PortTradeReply tells the ship what it traded and what the port has left of
+// that commodity.
+type PortTradeReply struct {
+	SectorID  string             `json:"sector_id"`
+	ShipID    string             `json:"ship_id"`
+	Commodity universe.Commodity `json:"commodity"`
+	Units     int                `json:"units"`
+	Available int                `json:"available"`
+	Tick      int64              `json:"tick"`
+}
+
 type Services struct {
 	nc       *nats.Conn
 	log      *slog.Logger
 	doctrine DoctrineUpdater
 	avatars  AdmiralCommissioner
+	ports    PortTrader
 }
 
-func New(nc *nats.Conn, log *slog.Logger, d DoctrineUpdater, a AdmiralCommissioner) *Services {
-	return &Services{nc: nc, log: log.With("loop", "services"), doctrine: d, avatars: a}
+func New(nc *nats.Conn, log *slog.Logger, d DoctrineUpdater, a AdmiralCommissioner, p PortTrader) *Services {
+	return &Services{nc: nc, log: log.With("loop", "services"), doctrine: d, avatars: a, ports: p}
 }
 
 func (s *Services) Name() string { return "services" }
@@ -77,6 +95,11 @@ func (s *Services) Run(ctx context.Context) error {
 	avatarCommission := func(req micro.Request) { s.avatarCommission(ctx, req) }
 	if err := grp.AddEndpoint("avatar-commission", micro.HandlerFunc(avatarCommission),
 		micro.WithEndpointSubject("avatar.commission")); err != nil {
+		return fmt.Errorf("endpoint: %w", err)
+	}
+	portTrade := func(req micro.Request) { s.portTrade(ctx, req) }
+	if err := grp.AddEndpoint("port-trade", micro.HandlerFunc(portTrade),
+		micro.WithEndpointSubject("port.trade")); err != nil {
 		return fmt.Errorf("endpoint: %w", err)
 	}
 
@@ -150,6 +173,38 @@ func (s *Services) avatarCommission(ctx context.Context, req micro.Request) {
 	default:
 		s.log.Error("avatar commission", "avatar_id", cmd.AvatarID, "err", err)
 		_ = req.Error("500", "admiral commission failed", nil)
+	}
+}
+
+func (s *Services) portTrade(ctx context.Context, req micro.Request) {
+	var cmd port.Trade
+	if err := json.Unmarshal(req.Data(), &cmd); err != nil {
+		_ = req.Error("400", "malformed trade: "+err.Error(), nil)
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(ctx, requestTimeout)
+	defer cancel()
+	ev, err := s.ports.Trade(ctx, cmd)
+	switch {
+	case err == nil:
+		_ = req.RespondJSON(PortTradeReply{
+			SectorID:  ev.SectorID,
+			ShipID:    ev.ShipID,
+			Commodity: ev.Commodity,
+			Units:     ev.Units,
+			Available: ev.Available[ev.Commodity],
+			Tick:      ev.Tick,
+		})
+	case errors.Is(err, port.ErrInvalid), errors.Is(err, port.ErrNoPort):
+		_ = req.Error("400", err.Error(), nil)
+	case errors.Is(err, port.ErrInsufficient):
+		_ = req.Error("422", err.Error(), nil)
+	case errors.Is(err, streams.ErrConflict):
+		_ = req.Error("409", "port traded concurrently, resubmit", nil)
+	default:
+		s.log.Error("port trade", "sector_id", cmd.SectorID, "err", err)
+		_ = req.Error("500", "trade failed", nil)
 	}
 }
 

@@ -98,7 +98,7 @@ func (u *Universe) checkNobodyStranded() error {
 		return fmt.Errorf("%w: graph is not strongly connected; some sector is a trap", errInvalid)
 	}
 	for _, s := range u.Sectors {
-		if len(u.Exits(s.ID)) == 0 {
+		if len(u.ExitsFromSector(s.ID)) == 0 {
 			return fmt.Errorf("%w: sector %d has no way out", errInvalid, s.ID)
 		}
 	}
@@ -143,7 +143,7 @@ func (u *Universe) checkSpurs() error {
 			continue
 		}
 		var out, back bool
-		for _, l := range u.Exits(s.ID) {
+		for _, l := range u.ExitsFromSector(s.ID) {
 			out = out || l.To == n[0]
 		}
 		for _, in := range u.inboundFrom(s.ID) {
@@ -158,15 +158,13 @@ func (u *Universe) checkSpurs() error {
 }
 
 func (u *Universe) checkPorts() error {
-	seen := make(map[int]bool, len(u.Ports))
-	for _, p := range u.Ports {
+	for i, p := range u.Ports {
 		if _, ok := u.Sector(p.Sector); !ok {
 			return fmt.Errorf("%w: port in unknown sector %d", errInvalid, p.Sector)
 		}
-		if seen[p.Sector] {
-			return fmt.Errorf("%w: sector %d has two ports", errInvalid, p.Sector)
+		if i > 0 && p.Sector <= u.Ports[i-1].Sector {
+			return fmt.Errorf("%w: ports out of order at sector %d", errInvalid, p.Sector)
 		}
-		seen[p.Sector] = true
 		for c, g := range p.Goods {
 			if g.Capacity <= 0 || g.Regen <= 0 {
 				return fmt.Errorf("%w: port %d commodity %d has capacity %d regen %d",
@@ -212,7 +210,7 @@ func (u *Universe) checkShortcutsExist() error {
 	public := u.publicAdjacency()
 	target := shortcutCount(len(u.Sectors))
 	found := 0
-	for _, c := range commodities {
+	for _, c := range Commodities {
 		var sellers, buyers []int
 		for _, p := range u.Ports {
 			if p.Goods[c].Sells {
@@ -249,7 +247,7 @@ func (u *Universe) laneCount(sectorID int) int {
 // neighbours: distinct sectors joined in either direction, ascending.
 func (u *Universe) neighbours(sectorID int) []int {
 	seen := map[int]bool{}
-	for _, l := range u.Exits(sectorID) {
+	for _, l := range u.ExitsFromSector(sectorID) {
 		seen[l.To] = true
 	}
 	for _, n := range u.inboundFrom(sectorID) {

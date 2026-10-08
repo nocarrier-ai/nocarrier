@@ -1,7 +1,7 @@
 // Package avatar is the fleet admiral aggregate: one subject per avatar on
-// EVENTS, owning identity and lifecycle. The flagship's mutable state (hull,
-// fuel, credits, position) is not here; it changes when a sector resolves a
-// tick, so those facts live in TickResolved on sector.<sector_id>.
+// EVENTS, owning identity and lifecycle. The flagship is a separate aggregate
+// (ship.<id>) that owns its own position, cargo, condition and credits;
+// doctrine and plan are on their own subjects too.
 package avatar
 
 import (
@@ -47,9 +47,8 @@ type CommissionAdmiral struct {
 
 // AdmiralCommissioned is the first event on avatar.<avatar_id> and the only one
 // appended at an empty subject: who the admiral is, where the flagship starts,
-// and when. Nothing about the flagship's condition or cargo belongs here, both
-// because that changes through sector resolution and because there are no
-// economy rules yet to be right about.
+// and when. The flagship's condition and cargo are the ship aggregate's state,
+// not the admiral's.
 type AdmiralCommissioned struct {
 	AvatarID   string `json:"avatar_id"`
 	Name       string `json:"name"`

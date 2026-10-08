@@ -26,8 +26,8 @@ type StatusEntry struct {
 
 // AvatarStatus folds avatar lifecycle events into the avatar-status bucket.
 // Commissioning creates the entry: identity and where the flagship started.
-// Everything a player watches change — hull, fuel, credits, position — arrives
-// from TickResolved, which this projection does not read yet.
+// What a player watches change — position, cargo, condition, credits — is the
+// ship aggregate's state, which this projection does not fold yet.
 type AvatarStatus struct {
 	kv jetstream.KeyValue
 }

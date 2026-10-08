@@ -78,8 +78,8 @@ var extraPlanetPercent = [maxPlanetsPerSector - 1]int{40, 5}
 func planetCount(n int) int    { return max(4, n/10) }
 func seededColonies(n int) int { return max(2, n/200) }
 
-// Generate builds a universe of sectors for seed. Deterministic. A bad result
-// is reseeded, not repaired.
+// Generate builds a universe of sectors for the given seed. Deterministic.
+// A bad result indicates a new seed is required.
 func Generate(seed int64, sectors int) (*Universe, error) {
 	if sectors < minSectors {
 		return nil, fmt.Errorf("universe needs at least %d sectors, got %d", minSectors, sectors)
@@ -179,7 +179,7 @@ func generate(seed int64, attempt, n int) *Universe {
 	b.placePlanets()
 
 	// Every mutating pass checks sound; asserted once more on the final set.
-	if !b.sound() {
+	if !b.graphCorrect() {
 		return nil
 	}
 	return b.emit(seed)
@@ -212,7 +212,7 @@ func (b *builder) buildCore() {
 	}
 }
 
-// buildTrunk joins the hubs in a ring and splices the core into it.
+// buildTrunk joins the hubs in a ring and links it to the core
 func (b *builder) buildTrunk() {
 	for i := range hubCount(b.n) {
 		h := coreSize(b.n) + i
@@ -315,7 +315,7 @@ func (b *builder) extraLaneCandidates(treeAdj [][]int, start int) []int {
 }
 
 // convertOneWay makes a share of regional lanes one-directional, reverting any
-// that break sound. A spur's only lane is never converted.
+// that break correctness rules. A spur's only lane is never converted.
 func (b *builder) convertOneWay() {
 	var eligible [][2]int
 	for _, l := range b.lanes {
@@ -340,7 +340,7 @@ func (b *builder) convertOneWay() {
 			from, to = to, from
 		}
 		removed := b.takeLane(from, to)
-		if b.sound() {
+		if b.graphCorrect() {
 			converted++
 			continue
 		}
@@ -383,7 +383,7 @@ func (b *builder) carvePockets() {
 		}
 		b.addOneWay(p, exit, lanePocket, false)
 
-		if b.sound() {
+		if b.graphCorrect() {
 			b.kind[p] = sectorPocket
 			carved++
 			continue
@@ -439,7 +439,7 @@ func (b *builder) assignStances() {
 			continue
 		}
 		raw := sellRawBase + sellRawSlope*b.depth[i]/treeDepthBound
-		for _, c := range commodities {
+		for _, c := range Commodities {
 			pct := raw
 			if c == Equipment {
 				pct = 100 - raw
@@ -461,7 +461,7 @@ func (b *builder) plantShortcuts() {
 	want := shortcutCount(b.n)
 	planted := 0
 	for attempt := 0; attempt < want*20 && planted < want; attempt++ {
-		c := commodities[b.rng.IntN(len(commodities))]
+		c := Commodities[b.rng.IntN(len(Commodities))]
 		var sellers, buyers []int
 		for i := range b.n {
 			if !b.hasPort[i] {
@@ -489,7 +489,7 @@ func (b *builder) plantShortcuts() {
 		}
 		saved := slices.Clone(b.lanes)
 		b.addTwoWay(a, z, laneShortcut, false)
-		if !b.sound() {
+		if !b.graphCorrect() {
 			b.lanes = saved
 			continue
 		}
@@ -526,7 +526,7 @@ func (b *builder) publicGraph() *graph {
 	return g
 }
 
-// placePlanets puts Terra at the spawn, then scatters planets weighted toward
+// placePlanets puts Terra at the spawn point, then scatters planets weighted toward
 // tree depth and heavily toward pockets, never in the core. Some placements
 // deliberately target a sector that already has a planet, so planets cluster;
 // a sector takes an extra planet at extraPlanetPercent. A few planets start
@@ -582,7 +582,8 @@ func (b *builder) placePlanets() {
 	}
 }
 
-// emit freezes the universe in canonical order. Kinds are not recorded.
+// emit freezes the universe in canonical order. The kinds and classes are discarded
+// because they are only used as hints during generation.
 func (b *builder) emit(seed int64) *Universe {
 	u := &Universe{
 		Version: version,
@@ -698,9 +699,9 @@ func (b *builder) graph() *graph {
 	return g
 }
 
-// sound reports whether the working graph is strongly connected and every
+// graphCorrect reports whether the working graph is strongly connected and every
 // sector is within trunkReach of a trunk lane.
-func (b *builder) sound() bool {
+func (b *builder) graphCorrect() bool {
 	g := b.graph()
 	if !g.stronglyConnected() {
 		return false

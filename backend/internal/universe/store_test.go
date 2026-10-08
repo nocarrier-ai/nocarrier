@@ -56,7 +56,7 @@ func TestStoreCreateThenLoad(t *testing.T) {
 	}
 	// lookups are rebuilt on load
 	for _, sec := range u.Sectors {
-		if !slices.Equal(back.Exits(sec.ID), u.Exits(sec.ID)) {
+		if !slices.Equal(back.ExitsFromSector(sec.ID), u.ExitsFromSector(sec.ID)) {
 			t.Fatalf("exits of %d differ after load", sec.ID)
 		}
 		if back.HasPort(sec.ID) != u.HasPort(sec.ID) {
@@ -222,8 +222,8 @@ func TestStoreLoadAcceptsASoundButPoorlyShapedMap(t *testing.T) {
 	if err != nil {
 		t.Fatalf("load refused a sound map over its shape: %v", err)
 	}
-	if back.Count() != 25 {
-		t.Errorf("loaded %d sectors, want 25", back.Count())
+	if back.SectorCount() != 25 {
+		t.Errorf("loaded %d sectors, want 25", back.SectorCount())
 	}
 }
 
