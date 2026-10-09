@@ -23,9 +23,11 @@ discovered.
 ## Vocabulary
 
 Most of these words describe how the generator builds the map, not what the
-map records. The stored universe holds only what is true in the world and never
+map records. The stored universe holds only what no aggregate owns and never
 changes: sectors, which of them are protected space, the lanes between them,
-where the ports are, and which lanes were public at the moment of creation. Hub, trunk, region and pocket are not labels on
+and which lanes were public at the moment of creation. Ports and planets are
+aggregates: the generator rolls them beside the map, and the big bang creates
+each one as the first event on its own subject. Hub, trunk, region and pocket are not labels on
 anything — a player finds a pocket by its shape and learns the highway by its
 traffic, and a flag saying "pocket" would hand over the thing they are meant to
 discover.
@@ -295,16 +297,18 @@ The port is an aggregate. It owns its books, a trade is one event on it, and a
 ship's cargo and credits are projections of that event.
 
 Every ordinary port trades all three commodities, as TW2002's eight port classes
-did. Per commodity it holds three fixed facts in the universe map:
+did. Per commodity it is created with three terms, carried on its `PortCreated`
+event:
 
 1. **Stance** — buys or sells.
 2. **Capacity** — TW2002's `max`.
 3. **Regen** — a fraction of capacity per tick, always toward capacity.
 
-And one runtime number, on the port aggregate, not in the map: **available** —
-goods on hand for a seller, demand remaining for a buyer. Starts at capacity,
-every trade reduces it, every tick regenerates it. The idle universe is every
-port at max, which is maximum opportunity; trade is what depletes it.
+And one number that moves: **available** — goods on hand for a seller, demand
+remaining for a buyer. Starts at capacity, every trade reduces it, every tick
+regenerates it. Every port event carries the port's state after it, so the
+last event on `port.<sector_id>` is the port. The idle universe is every port
+at max, which is maximum opportunity; trade is what depletes it.
 
 Price is derived, never stored. The local factor is percent-of-max: a seller
 gets dearer as it drains, a buyer pays less as it fills. The distance factor is
@@ -445,8 +449,9 @@ Worth asserting:
 ## Determinism
 
 Generation is a pure function of the seed, and the map is stored rather than
-recomputed, so determinism is a convenience rather than a correctness
-requirement. It is still worth keeping: a seed in a bug report should reproduce
+recomputed. Determinism still carries weight: an instance that finds a stored
+map whose big bang never finished rolls the ports and planets again from the
+seed, and must get the same roster; and a seed in a bug report should reproduce
 the universe that caused it.
 
 **No coordinates, no floating point, anywhere in generation.** Warp lanes
@@ -464,10 +469,9 @@ is randomised; sort the keys.
 derived on every startup. Storing the map removes the problem entirely: a
 changed generator cannot disturb a universe that already exists, because nothing
 regenerates it. The map carries a generator version as provenance. The encoding
-is `gob`, chosen over a bespoke format because a field added for a later pass —
-port economies, planets — decodes as its zero value on a map stored before it
-existed, so an existing universe keeps loading without a reader per format
-version.
+is `gob`, chosen over a bespoke format because a field added later decodes as
+its zero value on a map stored before it existed, so an existing universe keeps
+loading without a reader per format version.
 
 The original reasoning, for the record: if the map is
 derived rather than stored, any later change to the generator silently moves

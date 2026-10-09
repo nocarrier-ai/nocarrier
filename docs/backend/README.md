@@ -28,10 +28,12 @@ Strict event sourcing terms apply throughout.
   and projections fold them. The aggregates are:
   - **universe clock** — single instance; `UniverseCreated`, then `TickAdvanced` forever.
   - **sector** — who is present, movement, combat. One `TickResolved` per sector-tick.
-  - **port** — the trading post's books: `available` per commodity, and every trade.
-    Stances, capacity and regeneration are facts in the universe map, not events.
+  - **port** — the trading post: born on `PortCreated` with its stance, capacity
+    and regen per commodity, then every trade. Each event carries the port's
+    state after it, so the last event on the subject is the port.
   - **ship** — the hull: position, cargo, condition. (planned)
-  - **planet** — colonies and what is on the surface. (planned, phase 3)
+  - **planet** — born on `PlanetCreated` with its sector, class and starting
+    colonists. Colonies and what is on the surface come later.
   - **avatar** — the fleet admiral: identity and lifecycle, with doctrine and plan on
     their own subjects.
   Cross-aggregate effects are never a second write. A trade is one event on the
@@ -189,9 +191,9 @@ Event streams (file storage, S2 compression where large, AllowDirect):
 
 - `CLOCK`     clock.universe          UniverseCreated, TickAdvanced
 - `EVENTS`    sector.<sector_id>      one TickResolved per sector-tick
-              port.<sector_id>        TradeExecuted (planned; one port per sector)
+              port.<sector_id>        PortCreated, then TradeCompleted (one port per sector)
               ship.<ship_id>          (planned)
-              planet.<planet_id>      (planned, phase 3)
+              planet.<planet_id>      PlanetCreated (ids assigned at the big bang; Terra is 1)
               avatar.<avatar_id>      AdmiralCommissioned, later lifecycle
               plan.<avatar_id>        PlanRevised
               doctrine.<avatar_id>    DoctrineUpdated
@@ -216,6 +218,7 @@ KV buckets (all rebuildable by replay):
 - `active-sectors`  dispatcher input; see Projections
 - `due-avatars`     dispatcher input: cadence + triggers per tick
 - `avatar-status`   Phoenix-facing current state
+- `port-status`     Phoenix-facing books per port; see Projections
 - `leaderboards`    Phoenix-facing rankings
 - `doctrine`        Phoenix-facing latest doctrine per avatar
 
@@ -274,10 +277,14 @@ is skipped. Phoenix reads it to show the current doctrine.
 
 `avatar-status` (implemented) folds `avatar.*` into the `avatar-status` bucket,
 keyed by avatar ID. Commissioning creates the entry: who the admiral is and
-where the flagship started. Everything a player watches change — hull, fuel,
-credits, position — is not avatar-aggregate data; it changes when a sector
-resolves a tick, so this projection will fold `sector.*` once TickResolved
-carries those outcomes.
+where the flagship started. What a player watches change — position, cargo,
+condition, credits — is the ship aggregate's state, which this projection does
+not fold yet.
+
+`port-status` (implemented) folds `port.*` into the `port-status` bucket, keyed
+by sector. `PortCreated` makes the entry — the terms per commodity with
+everything at capacity — and every port event carries the port's state after
+it, so the fold replaces the entry, guarded by `seq`.
 
 `due-avatars` (implemented) is the dispatcher's decide-side read model. It folds
 `avatar.*` and `plan.*`. Entry per avatar: `{next_tick, seq}`.
@@ -313,6 +320,15 @@ enforce this. The contract is:
   "resubmit". Every admiral spawns in sector 0; a real spawn picked from the
   universe map is a TODO, as is the starting loadout, which no event carries
   until there are economy rules to set it by.
+  cmd.port.trade -> validate against the port's books -> append TradeCompleted
+  -> reply with `{sector_id, ship_id, commodity, units, available, tick}`.
+  The port is the last event on `port.<sector_id>` — `PortCreated` at the big
+  bang, then every trade, each carrying the port's state after it — and the
+  append expects that sequence, so two trades racing for the same stock cannot
+  both succeed. An invalid command or a sector without a port replies 400,
+  more than the port can fill 422, a lost race 409 (resubmit). Regeneration
+  toward capacity is a separate command the port resolves on its tick, not
+  yet implemented.
 - **Current state**: read KV buckets directly; KV watches drive live updates.
 - **History**: request/reply to the query micro service, e.g.
   query.decisions.page reads decisions.<avatar_id> by time window with an
