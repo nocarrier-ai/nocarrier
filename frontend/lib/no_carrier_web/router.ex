@@ -22,6 +22,8 @@ defmodule NoCarrierWeb.Router do
 
     get "/", PageController, :home
     delete "/log-out", AuthController, :delete
+    get "/players/new", PlayerController, :new
+    post "/players", PlayerController, :create
   end
 
   scope "/auth", NoCarrierWeb do
@@ -37,6 +39,7 @@ defmodule NoCarrierWeb.Router do
     live_session :require_authenticated_player,
       on_mount: [{NoCarrierWeb.PlayerAuth, :ensure_authenticated}] do
       live "/play", PlayLive
+      live "/settings", SettingsLive
     end
   end
 

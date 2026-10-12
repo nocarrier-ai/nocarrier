@@ -1,0 +1,46 @@
+<Layouts.app flash={@flash} current_scope={@current_scope}>
+  <div id="new-player" class="mx-auto max-w-xl space-y-8">
+    <.header>
+      <span class="text-primary glow uppercase tracking-[0.2em]">New player</span>
+      <:subtitle>
+        Carrier detected on {@pending_account.login}. No player answers to that account yet.
+      </:subtitle>
+    </.header>
+
+    <.panel id="display-name" title="Display name">
+      <p class="text-sm leading-relaxed text-base-content/70">
+        Choose the name other admirals will see. It does not have to be your GitHub login,
+        and your GitHub account is never shown to other players.
+      </p>
+
+      <.form
+        for={@form}
+        id="player-form"
+        action={~p"/players"}
+        method="post"
+        class="mt-5 space-y-4"
+      >
+        <.input
+          field={@form[:display_name]}
+          type="text"
+          label="Display name"
+          maxlength={NoCarrier.Players.display_name_limit()}
+          autocomplete="nickname"
+          autofocus
+          required
+          class="input w-full text-lg tracking-[0.15em] text-primary"
+        />
+        <div class="flex flex-wrap items-center justify-between gap-4">
+          <p class="text-xs text-base-content/50">
+            1 to {NoCarrier.Players.display_name_limit()} characters.
+          </p>
+          <.button id="create-player" class="btn btn-primary uppercase tracking-[0.2em]">
+            Create player <.icon name="hero-arrow-right" class="size-4" />
+          </.button>
+        </div>
+      </.form>
+    </.panel>
+
+    <.prompt>awaiting player registration</.prompt>
+  </div>
+</Layouts.app>

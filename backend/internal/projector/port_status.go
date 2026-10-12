@@ -14,12 +14,10 @@ import (
 )
 
 // PortStatusEntry is the Phoenix-facing current state of one port: its terms
-// per commodity beside what is available. Seq is the stream sequence of the
-// last event folded in.
+// per commodity beside what is available.
 type PortStatusEntry struct {
 	SectorID    string                                     `json:"sector_id"`
 	Commodities [len(universe.Commodities)]CommodityStatus `json:"commodities"`
-	Seq         uint64                                     `json:"seq"`
 }
 
 // CommodityStatus is one commodity's terms and availability at a port.
@@ -30,8 +28,8 @@ type CommodityStatus struct {
 }
 
 // PortStatus folds port.* into the port-status bucket, keyed by sector. Every
-// port event carries the port's state after it, so the fold is a replace
-// guarded by Seq; PortCreated makes the entry.
+// port event carries the port's state after it, so the fold is a replace;
+// PortCreated makes the entry.
 type PortStatus struct {
 	kv jetstream.KeyValue
 }
@@ -72,30 +70,8 @@ func (s *PortStatus) Apply(ctx context.Context, msg jetstream.Msg) error {
 	if !ok {
 		return nil
 	}
-	md, err := msg.Metadata()
-	if err != nil {
-		return err
-	}
 
-	var (
-		stored PortStatusEntry
-		rev    uint64
-	)
-	entry, err := s.kv.Get(ctx, sectorID)
-	switch {
-	case err == nil:
-		if err := json.Unmarshal(entry.Value(), &stored); err != nil {
-			return fmt.Errorf("entry %s: %w", sectorID, err)
-		}
-		rev = entry.Revision()
-	case !errors.Is(err, jetstream.ErrKeyNotFound):
-		return err
-	}
-	if md.Sequence.Stream <= stored.Seq {
-		return nil
-	}
-
-	e := PortStatusEntry{SectorID: sectorID, Seq: md.Sequence.Stream}
+	e := PortStatusEntry{SectorID: sectorID}
 	for c, g := range st.Commodities {
 		e.Commodities[c] = CommodityStatus{Sells: g.Sells, Capacity: g.Capacity, Available: st.Available[c]}
 	}
@@ -103,11 +79,7 @@ func (s *PortStatus) Apply(ctx context.Context, msg jetstream.Msg) error {
 	if err != nil {
 		return err
 	}
-	if rev == 0 {
-		_, err = s.kv.Create(ctx, sectorID, data)
-	} else {
-		_, err = s.kv.Update(ctx, sectorID, data, rev)
-	}
+	_, err = s.kv.Put(ctx, sectorID, data)
 	return err
 }
 

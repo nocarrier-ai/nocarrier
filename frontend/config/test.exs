@@ -24,3 +24,5 @@ config :phoenix,
 config :ueberauth, Ueberauth.Strategy.Github.OAuth,
   client_id: "github-client-id",
   client_secret: "github-client-secret"
+
+config :no_carrier, players_service: NoCarrier.Players.Service.Memory

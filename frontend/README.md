@@ -13,14 +13,51 @@ root module is `NoCarrier`.
 | --------------------------- | --------- | --------------------------------------------- |
 | `GET /`                     | public    | Landing page                                  |
 | `GET /auth/github`          | public    | Starts the GitHub OAuth flow                  |
-| `GET /auth/github/callback` | public    | Finishes sign-in and sends the player to play |
+| `GET /auth/github/callback` | public    | Finishes sign-in: known players go to play, new ones to `/players/new` |
+| `GET /players/new`          | signed in | First sign-in only: choose the display name   |
+| `POST /players`             | signed in | Creates the player in the universe            |
 | `DELETE /log-out`           | public    | Ends the session                              |
 | `GET /play`                 | signed in | The game (placeholder)                        |
+| `GET /settings`             | signed in | The player's dial-in code for telnet          |
 
 Sign-in is handled by [Ueberauth](https://hexdocs.pm/ueberauth). The signed-in
 player lives in the session cookie as a `NoCarrier.Players.Player`; there is no
 database. Every request gets a `current_scope` assign, `nil` when nobody is
 signed in.
+
+## Players and the universe
+
+Phoenix reaches the universe (`nocarrierd`) over NATS with
+[Gnat](https://hexdocs.pm/gnat). It never touches event streams: it reads the
+`player-status` KV bucket and sends commands by request/reply.
+
+On every GitHub sign-in Phoenix looks the OAuth ID up in `player-status`
+(`oauth.github.<uid>`, then the player ID it points at). A known player is
+signed straight in. An OAuth ID the universe has never seen is sent to
+`/players/new` to choose a display name, so nobody has to advertise their
+GitHub login. Submitting the name sends `cmd.player.create` with a player ID
+and dial-in code Phoenix generated; the reply is the player, who is then
+signed in. The dial-in code is the code the telnet relay asks for and is
+shown on the Settings page.
+
+The NATS side is configured by environment:
+
+- `NATS_URL` (default `nats://127.0.0.1:4222`; required in prod), for example
+  `tls://connect.ngs.global`
+- `NATS_CREDS`, optional path to a `.creds` file with the user JWT and nkey
+  seed, which is how NGS and any other account-based server authenticate
+
+`config :no_carrier, :players_service` picks the implementation:
+`NoCarrier.Players.Service.Nats` everywhere except tests, which use
+`NoCarrier.Players.Service.Memory`, an in-memory stand-in started per test
+with `setup :start_players_service`.
+
+Locally, run the universe with its embedded NATS server and Phoenix finds it
+on the default URL:
+
+```sh
+cd backend && NOCARRIER_EMBEDDED_NATS=true go run ./cmd/nocarrierd
+```
 
 ## Running locally
 
@@ -73,6 +110,7 @@ fly launch --no-deploy        # keep the existing fly.toml and Dockerfile
 fly secrets set \
   SECRET_KEY_BASE="$(mix phx.gen.secret)" \
   RELEASE_COOKIE="$(openssl rand -hex 32)" \
+  NATS_URL=tls://... \
   GITHUB_CLIENT_ID=... \
   GITHUB_CLIENT_SECRET=...
 fly deploy

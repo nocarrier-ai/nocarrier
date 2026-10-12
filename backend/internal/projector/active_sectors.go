@@ -18,8 +18,7 @@ type ActiveEntry struct {
 	// LastResolved is the last tick this sector resolved; -1 before its
 	// first TickResolved. The dispatcher publishes ExecuteTick for every
 	// tick from LastResolved+1 through the current tick.
-	LastResolved int64  `json:"last_resolved"`
-	Seq          uint64 `json:"seq"`
+	LastResolved int64 `json:"last_resolved"`
 }
 
 type ActiveSectors struct {
@@ -73,10 +72,6 @@ func (a *ActiveSectors) Apply(ctx context.Context, msg jetstream.Msg) error {
 	if f == nil {
 		return nil
 	}
-	md, err := msg.Metadata()
-	if err != nil {
-		return err
-	}
 
 	var (
 		e   = ActiveEntry{LastResolved: -1}
@@ -93,7 +88,7 @@ func (a *ActiveSectors) Apply(ctx context.Context, msg jetstream.Msg) error {
 		return err
 	}
 
-	next, o := step(e, rev != 0, md.Sequence.Stream, f)
+	next, o := step(e, rev != 0, f)
 	switch o {
 	case opPut:
 		data, err := json.Marshal(next)
@@ -162,11 +157,7 @@ func route(data []byte) (string, fold) {
 	return "", nil
 }
 
-func step(e ActiveEntry, exists bool, seq uint64, f fold) (ActiveEntry, op) {
-	if seq <= e.Seq {
-		return e, opSkip
-	}
-	e.Seq = seq
+func step(e ActiveEntry, exists bool, f fold) (ActiveEntry, op) {
 	if f(&e) {
 		return e, opPut
 	}

@@ -38,8 +38,8 @@ func TestRouteDue(t *testing.T) {
 		{
 			name: "commission never resets an existing schedule",
 			data: commissioned("a1", 4), exists: true,
-			e:      DueEntry{NextTick: 40, Seq: 9},
-			wantID: "a1", wantWrit: false, want: DueEntry{NextTick: 40, Seq: 9},
+			e:      DueEntry{NextTick: 40},
+			wantID: "a1", wantWrit: false, want: DueEntry{NextTick: 40},
 		},
 		{
 			name: "decision pushes the schedule out by the cadence",

@@ -14,6 +14,7 @@ defmodule NoCarrier.Application do
       {Horde.Registry, name: NoCarrier.HordeRegistry, keys: :unique, members: :auto},
       {Horde.DynamicSupervisor,
        name: NoCarrier.HordeSupervisor, strategy: :one_for_one, members: :auto},
+      NoCarrier.Nats,
       NoCarrierWeb.Endpoint
     ]
 

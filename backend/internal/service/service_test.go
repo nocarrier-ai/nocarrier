@@ -18,7 +18,9 @@ import (
 	"github.com/nocarrier-ai/nocarrier/internal/clock"
 	"github.com/nocarrier-ai/nocarrier/internal/doctrine"
 	"github.com/nocarrier-ai/nocarrier/internal/natstest"
+	"github.com/nocarrier-ai/nocarrier/internal/player"
 	"github.com/nocarrier-ai/nocarrier/internal/port"
+	"github.com/nocarrier-ai/nocarrier/internal/projector"
 	"github.com/nocarrier-ai/nocarrier/internal/service"
 	"github.com/nocarrier-ai/nocarrier/internal/streams"
 	"github.com/nocarrier-ai/nocarrier/internal/universe"
@@ -28,6 +30,7 @@ const (
 	doctrineUpdateSubject   = "cmd.doctrine.update"
 	avatarCommissionSubject = "cmd.avatar.commission"
 	portTradeSubject        = "cmd.port.trade"
+	playerCreateSubject     = "cmd.player.create"
 )
 
 type fakeUpdater struct {
@@ -93,10 +96,31 @@ func (f *fakeTrader) received() []port.Trade {
 	return append([]port.Trade(nil), f.calls...)
 }
 
-func startServices(t *testing.T, d service.DoctrineUpdater, a service.AdmiralCommissioner, p service.PortTrader) (jetstream.JetStream, *nats.Conn) {
+type fakeCreator struct {
+	ev  player.PlayerCreated
+	err error
+
+	mu    sync.Mutex
+	calls []player.CreatePlayer
+}
+
+func (f *fakeCreator) Create(_ context.Context, cmd player.CreatePlayer) (player.PlayerCreated, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.calls = append(f.calls, cmd)
+	return f.ev, f.err
+}
+
+func (f *fakeCreator) received() []player.CreatePlayer {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]player.CreatePlayer(nil), f.calls...)
+}
+
+func startServices(t *testing.T, d service.DoctrineUpdater, a service.AdmiralCommissioner, p service.PortTrader, pl service.PlayerCreator) (jetstream.JetStream, *nats.Conn) {
 	t.Helper()
 	js := natstest.Start(t)
-	natstest.Run(t, service.New(js.Conn(), natstest.Logger(), d, a, p))
+	natstest.Run(t, service.New(js.Conn(), natstest.Logger(), d, a, p, pl))
 	return js, js.Conn()
 }
 
@@ -137,6 +161,20 @@ func tradeJSON(t *testing.T, nc *nats.Conn, v any) *nats.Msg {
 	return requestOn(t, nc, portTradeSubject, marshal(t, v))
 }
 
+func createJSON(t *testing.T, nc *nats.Conn, v any) *nats.Msg {
+	t.Helper()
+	return requestOn(t, nc, playerCreateSubject, marshal(t, v))
+}
+
+func create(playerID, uid, displayName string) player.CreatePlayer {
+	return player.CreatePlayer{
+		PlayerID:    playerID,
+		OAuthID:     player.OAuthID{Provider: "github", UID: uid},
+		DisplayName: displayName,
+		DialInCode:  "7719-0402-5518",
+	}
+}
+
 func trade(sectorID, shipID string, c universe.Commodity, units int) port.Trade {
 	return port.Trade{SectorID: sectorID, ShipID: shipID, Commodity: c, Units: units}
 }
@@ -164,7 +202,7 @@ func errorCode(msg *nats.Msg) string {
 
 func TestDoctrineUpdateReplies(t *testing.T) {
 	fake := &fakeUpdater{ev: doctrine.DoctrineUpdated{Revision: 2, Tick: 7, Hash: "abc"}}
-	_, nc := startServices(t, fake, &fakeCommissioner{}, &fakeTrader{})
+	_, nc := startServices(t, fake, &fakeCommissioner{}, &fakeTrader{}, &fakeCreator{})
 
 	msg := requestJSON(t, nc, update("a1", "trade first"))
 	if code := errorCode(msg); code != "" {
@@ -195,7 +233,7 @@ func TestDoctrineUpdateErrorCodes(t *testing.T) {
 	}
 	for name, c := range cases {
 		t.Run(name, func(t *testing.T) {
-			_, nc := startServices(t, &fakeUpdater{err: c.err}, &fakeCommissioner{}, &fakeTrader{})
+			_, nc := startServices(t, &fakeUpdater{err: c.err}, &fakeCommissioner{}, &fakeTrader{}, &fakeCreator{})
 			msg := requestJSON(t, nc, update("a1", "x"))
 			if code := errorCode(msg); code != c.code {
 				t.Errorf("code %q, want %q", code, c.code)
@@ -205,7 +243,7 @@ func TestDoctrineUpdateErrorCodes(t *testing.T) {
 }
 
 func TestDoctrineUpdateInvalidNamesReason(t *testing.T) {
-	_, nc := startServices(t, &fakeUpdater{err: fmt.Errorf("%w: unknown hook \"bribed\"", doctrine.ErrInvalid)}, &fakeCommissioner{}, &fakeTrader{})
+	_, nc := startServices(t, &fakeUpdater{err: fmt.Errorf("%w: unknown hook \"bribed\"", doctrine.ErrInvalid)}, &fakeCommissioner{}, &fakeTrader{}, &fakeCreator{})
 	msg := requestJSON(t, nc, update("a1", "x"))
 	if desc := msg.Header.Get(micro.ErrorHeader); !strings.Contains(desc, "bribed") {
 		t.Errorf("description %q does not name the reason", desc)
@@ -214,7 +252,7 @@ func TestDoctrineUpdateInvalidNamesReason(t *testing.T) {
 
 func TestDoctrineUpdateMalformed(t *testing.T) {
 	fake := &fakeUpdater{}
-	_, nc := startServices(t, fake, &fakeCommissioner{}, &fakeTrader{})
+	_, nc := startServices(t, fake, &fakeCommissioner{}, &fakeTrader{}, &fakeCreator{})
 
 	msg := request(t, nc, []byte(`{"avatar_id":`))
 	if code := errorCode(msg); code != "400" {
@@ -231,7 +269,7 @@ func TestDoctrineUpdateThroughHandler(t *testing.T) {
 	if _, err := streams.Append(ctx, js, streams.SubjectClock, clock.UniverseCreated{Type: "UniverseCreated"}, 0); err != nil {
 		t.Fatalf("universe: %v", err)
 	}
-	natstest.Run(t, service.New(js.Conn(), natstest.Logger(), doctrine.NewHandler(js), avatar.NewHandler(js), &fakeTrader{}))
+	natstest.Run(t, service.New(js.Conn(), natstest.Logger(), doctrine.NewHandler(js), avatar.NewHandler(js), &fakeTrader{}, &fakeCreator{}))
 
 	msg := requestJSON(t, js.Conn(), update("a1", "trade first"))
 	var reply service.DoctrineUpdateReply
@@ -261,7 +299,7 @@ func TestAvatarCommissionReplies(t *testing.T) {
 		HomeSector: avatar.StartingSector,
 		Tick:       7,
 	}}
-	_, nc := startServices(t, &fakeUpdater{}, fake, &fakeTrader{})
+	_, nc := startServices(t, &fakeUpdater{}, fake, &fakeTrader{}, &fakeCreator{})
 
 	msg := commissionJSON(t, nc, commission("a1", "Akbar", "USS Cheesewheel"))
 	if code := errorCode(msg); code != "" {
@@ -299,7 +337,7 @@ func TestAvatarCommissionErrorCodes(t *testing.T) {
 	}
 	for name, c := range cases {
 		t.Run(name, func(t *testing.T) {
-			_, nc := startServices(t, &fakeUpdater{}, &fakeCommissioner{err: c.err}, &fakeTrader{})
+			_, nc := startServices(t, &fakeUpdater{}, &fakeCommissioner{err: c.err}, &fakeTrader{}, &fakeCreator{})
 			msg := commissionJSON(t, nc, commission("a1", "Akbar", "Cheesewheel"))
 			if code := errorCode(msg); code != c.code {
 				t.Errorf("code %q, want %q", code, c.code)
@@ -311,7 +349,7 @@ func TestAvatarCommissionErrorCodes(t *testing.T) {
 // A lost race on the avatar subject means the admiral already exists, so it
 // must not surface as the doctrine endpoint's retryable 409.
 func TestAvatarCommissionAlreadyDoesNotSayResubmit(t *testing.T) {
-	_, nc := startServices(t, &fakeUpdater{}, &fakeCommissioner{err: avatar.ErrAlreadyCommissioned}, &fakeTrader{})
+	_, nc := startServices(t, &fakeUpdater{}, &fakeCommissioner{err: avatar.ErrAlreadyCommissioned}, &fakeTrader{}, &fakeCreator{})
 	msg := commissionJSON(t, nc, commission("a1", "Akbar", "Cheesewheel"))
 	desc := msg.Header.Get(micro.ErrorHeader)
 	if !strings.Contains(desc, "already commissioned") || strings.Contains(desc, "resubmit") {
@@ -322,7 +360,7 @@ func TestAvatarCommissionAlreadyDoesNotSayResubmit(t *testing.T) {
 func TestAvatarCommissionInvalidNamesReason(t *testing.T) {
 	_, nc := startServices(t, &fakeUpdater{}, &fakeCommissioner{
 		err: fmt.Errorf("%w: flagship name is 60 characters, limit is 48", avatar.ErrInvalid),
-	}, &fakeTrader{})
+	}, &fakeTrader{}, &fakeCreator{})
 	msg := commissionJSON(t, nc, commission("a1", "Akbar", "Cheesewheel"))
 	if desc := msg.Header.Get(micro.ErrorHeader); !strings.Contains(desc, "flagship name") {
 		t.Errorf("description %q does not name the reason", desc)
@@ -331,7 +369,7 @@ func TestAvatarCommissionInvalidNamesReason(t *testing.T) {
 
 func TestAvatarCommissionMalformed(t *testing.T) {
 	fake := &fakeCommissioner{}
-	_, nc := startServices(t, &fakeUpdater{}, fake, &fakeTrader{})
+	_, nc := startServices(t, &fakeUpdater{}, fake, &fakeTrader{}, &fakeCreator{})
 
 	msg := requestOn(t, nc, avatarCommissionSubject, []byte(`{"avatar_id":`))
 	if code := errorCode(msg); code != "400" {
@@ -348,7 +386,7 @@ func TestAvatarCommissionThroughHandler(t *testing.T) {
 	if _, err := streams.Append(ctx, js, streams.SubjectClock, clock.UniverseCreated{Type: "UniverseCreated"}, 0); err != nil {
 		t.Fatalf("universe: %v", err)
 	}
-	natstest.Run(t, service.New(js.Conn(), natstest.Logger(), doctrine.NewHandler(js), avatar.NewHandler(js), &fakeTrader{}))
+	natstest.Run(t, service.New(js.Conn(), natstest.Logger(), doctrine.NewHandler(js), avatar.NewHandler(js), &fakeTrader{}, &fakeCreator{}))
 
 	msg := commissionJSON(t, js.Conn(), commission("a1", "Akbar", "USS Cheesewheel"))
 	var reply service.AvatarCommissionReply
@@ -384,7 +422,7 @@ func TestCommandEndpointsAreIndependent(t *testing.T) {
 	updater := &fakeUpdater{ev: doctrine.DoctrineUpdated{Revision: 1}}
 	commissioner := &fakeCommissioner{ev: avatar.AdmiralCommissioned{AvatarID: "a1"}}
 	trader := &fakeTrader{ev: port.TradeCompleted{SectorID: "1"}}
-	_, nc := startServices(t, updater, commissioner, trader)
+	_, nc := startServices(t, updater, commissioner, trader, &fakeCreator{})
 
 	if code := errorCode(requestJSON(t, nc, update("a1", "trade first"))); code != "" {
 		t.Errorf("doctrine code %q", code)
@@ -411,7 +449,7 @@ func TestPortTradeReplies(t *testing.T) {
 		State:     port.State{Available: port.Available{1000, 1950, 3000}},
 		Tick:      7,
 	}}
-	_, nc := startServices(t, &fakeUpdater{}, &fakeCommissioner{}, fake)
+	_, nc := startServices(t, &fakeUpdater{}, &fakeCommissioner{}, fake, &fakeCreator{})
 
 	msg := tradeJSON(t, nc, trade("1", "s1", universe.Organics, 50))
 	if code := errorCode(msg); code != "" {
@@ -452,7 +490,7 @@ func TestPortTradeErrorCodes(t *testing.T) {
 	}
 	for name, c := range cases {
 		t.Run(name, func(t *testing.T) {
-			_, nc := startServices(t, &fakeUpdater{}, &fakeCommissioner{}, &fakeTrader{err: c.err})
+			_, nc := startServices(t, &fakeUpdater{}, &fakeCommissioner{}, &fakeTrader{err: c.err}, &fakeCreator{})
 			msg := tradeJSON(t, nc, trade("1", "s1", universe.FuelOre, 10))
 			if code := errorCode(msg); code != c.code {
 				t.Errorf("code %q, want %q", code, c.code)
@@ -463,7 +501,7 @@ func TestPortTradeErrorCodes(t *testing.T) {
 
 func TestPortTradeMalformed(t *testing.T) {
 	fake := &fakeTrader{}
-	_, nc := startServices(t, &fakeUpdater{}, &fakeCommissioner{}, fake)
+	_, nc := startServices(t, &fakeUpdater{}, &fakeCommissioner{}, fake, &fakeCreator{})
 	msg := requestOn(t, nc, portTradeSubject, []byte(`{"sector_id": 1`))
 	if code := errorCode(msg); code != "400" {
 		t.Errorf("code %q, want 400", code)
@@ -488,7 +526,7 @@ func TestPortTradeThroughHandler(t *testing.T) {
 	}}); err != nil {
 		t.Fatalf("create port: %v", err)
 	}
-	natstest.Run(t, service.New(js.Conn(), natstest.Logger(), doctrine.NewHandler(js), avatar.NewHandler(js), ports))
+	natstest.Run(t, service.New(js.Conn(), natstest.Logger(), doctrine.NewHandler(js), avatar.NewHandler(js), ports, &fakeCreator{}))
 
 	msg := tradeJSON(t, js.Conn(), trade("1", "s1", universe.FuelOre, 100))
 	var reply service.PortTradeReply
@@ -514,5 +552,130 @@ func TestPortTradeThroughHandler(t *testing.T) {
 	msg = tradeJSON(t, js.Conn(), trade("2", "s1", universe.FuelOre, 1))
 	if code := errorCode(msg); code != "400" {
 		t.Errorf("no-port code %q, want 400", code)
+	}
+}
+
+func TestPlayerCreateReplies(t *testing.T) {
+	fake := &fakeCreator{ev: player.PlayerCreated{
+		PlayerID:    "p1",
+		OAuthID:     player.OAuthID{Provider: "github", UID: "42"},
+		DisplayName: "ada",
+		DialInCode:  "7719-0402-5518",
+		Tick:        7,
+		Type:        player.PlayerCreatedType,
+	}}
+	_, nc := startServices(t, &fakeUpdater{}, &fakeCommissioner{}, &fakeTrader{}, fake)
+
+	msg := createJSON(t, nc, create("p1", "42", "ada"))
+	if code := errorCode(msg); code != "" {
+		t.Fatalf("error %s: %s", code, msg.Header.Get(micro.ErrorHeader))
+	}
+	var reply service.PlayerCreateReply
+	if err := json.Unmarshal(msg.Data, &reply); err != nil {
+		t.Fatalf("decode reply: %v", err)
+	}
+	want := service.PlayerCreateReply{PlayerID: "p1", DisplayName: "ada", DialInCode: "7719-0402-5518", Tick: 7}
+	if reply != want {
+		t.Errorf("reply = %+v, want %+v", reply, want)
+	}
+
+	calls := fake.received()
+	if len(calls) != 1 || calls[0] != create("p1", "42", "ada") {
+		t.Errorf("handler received %+v", calls)
+	}
+}
+
+func TestPlayerCreateErrorCodes(t *testing.T) {
+	cases := map[string]struct {
+		err  error
+		code string
+	}{
+		"invalid":    {fmt.Errorf("%w: missing display name", player.ErrInvalid), "400"},
+		"registered": {player.ErrAlreadyRegistered, "409"},
+		"exists":     {fmt.Errorf("create p1: %w", player.ErrAlreadyExists), "409"},
+		"other":      {errors.New("nats unavailable"), "500"},
+	}
+	for name, c := range cases {
+		t.Run(name, func(t *testing.T) {
+			_, nc := startServices(t, &fakeUpdater{}, &fakeCommissioner{}, &fakeTrader{}, &fakeCreator{err: c.err})
+			msg := createJSON(t, nc, create("p1", "42", "ada"))
+			if code := errorCode(msg); code != c.code {
+				t.Errorf("code %q, want %q", code, c.code)
+			}
+		})
+	}
+}
+
+func TestPlayerCreateRegisteredNamesTheOAuthID(t *testing.T) {
+	_, nc := startServices(t, &fakeUpdater{}, &fakeCommissioner{}, &fakeTrader{}, &fakeCreator{err: player.ErrAlreadyRegistered})
+	msg := createJSON(t, nc, create("p1", "42", "ada"))
+	desc := msg.Header.Get(micro.ErrorHeader)
+	if !strings.Contains(desc, "already registered") || strings.Contains(desc, "resubmit") {
+		t.Errorf("description %q", desc)
+	}
+}
+
+func TestPlayerCreateMalformed(t *testing.T) {
+	fake := &fakeCreator{}
+	_, nc := startServices(t, &fakeUpdater{}, &fakeCommissioner{}, &fakeTrader{}, fake)
+
+	msg := requestOn(t, nc, playerCreateSubject, []byte(`{"player_id":`))
+	if code := errorCode(msg); code != "400" {
+		t.Errorf("code %q, want 400", code)
+	}
+	if calls := fake.received(); len(calls) != 0 {
+		t.Errorf("handler called with %+v", calls)
+	}
+}
+
+func TestPlayerCreateThroughHandler(t *testing.T) {
+	js := natstest.Start(t)
+	ctx := natstest.Context(t)
+	if _, err := streams.Append(ctx, js, streams.SubjectClock, clock.UniverseCreated{Type: "UniverseCreated"}, 0); err != nil {
+		t.Fatalf("universe: %v", err)
+	}
+	status, err := projector.NewPlayerStatus(ctx, js)
+	if err != nil {
+		t.Fatalf("projection: %v", err)
+	}
+	natstest.Run(t, projector.NewLoop(js, natstest.Logger(), status))
+	natstest.Run(t, service.New(js.Conn(), natstest.Logger(), doctrine.NewHandler(js), avatar.NewHandler(js), &fakeTrader{}, player.NewHandler(js, status)))
+
+	msg := createJSON(t, js.Conn(), create("p1", "42", "ada"))
+	var reply service.PlayerCreateReply
+	if err := json.Unmarshal(msg.Data, &reply); err != nil || errorCode(msg) != "" {
+		t.Fatalf("reply %q, code %q, err %v", msg.Data, errorCode(msg), err)
+	}
+	if reply.PlayerID != "p1" || reply.DialInCode != "7719-0402-5518" || reply.Tick != 0 {
+		t.Errorf("reply = %+v", reply)
+	}
+
+	var stored player.PlayerCreated
+	if !natstest.Last(t, js, streams.StreamEvents, streams.PlayerSubject("p1"), &stored) {
+		t.Fatal("no event appended")
+	}
+	if stored.DisplayName != "ada" || stored.OAuthID.UID != "42" {
+		t.Errorf("stored = %+v", stored)
+	}
+
+	natstest.Eventually(t, 5*time.Second, func() bool {
+		_, found, err := status.PlayerIDByOAuthID(ctx, player.OAuthID{Provider: "github", UID: "42"})
+		if err != nil {
+			t.Fatalf("lookup: %v", err)
+		}
+		return found
+	})
+
+	msg = createJSON(t, js.Conn(), create("p2", "42", "ada again"))
+	if code := errorCode(msg); code != "409" {
+		t.Errorf("second player for the same oauth id code %q, want 409", code)
+	}
+	msg = createJSON(t, js.Conn(), create("p1", "43", "bob"))
+	if code := errorCode(msg); code != "409" {
+		t.Errorf("reused player id code %q, want 409", code)
+	}
+	msg = createJSON(t, js.Conn(), create("p.3", "44", "eve"))
+	if code := errorCode(msg); code != "400" {
+		t.Errorf("invalid player id code %q, want 400", code)
 	}
 }

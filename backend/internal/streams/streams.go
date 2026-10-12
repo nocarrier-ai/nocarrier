@@ -6,6 +6,8 @@ import (
 	"regexp"
 	"strconv"
 	"time"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/nats-io/nats.go/jetstream"
 )
@@ -23,6 +25,7 @@ const (
 	PortEvents     = "port.*"
 	PlanetEvents   = "planet.*"
 	AvatarEvents   = "avatar.*"
+	PlayerEvents   = "player.*"
 	PlanEvents     = "plan.*"
 	DoctrineEvents = "doctrine.*"
 
@@ -33,6 +36,7 @@ const (
 	BucketPortStatus   = "port-status"
 	BucketLeaderboards = "leaderboards"
 	BucketDoctrine     = "doctrine"
+	BucketPlayerStatus = "player-status"
 	// BucketUniverse holds the one packed sector map, written once at the big
 	// bang. Binary rather than JSON keeps even a very large universe inside
 	// the default max payload, so a plain KV value does the job.
@@ -47,6 +51,24 @@ var validID = regexp.MustCompile(`^[A-Za-z0-9_-]+$`)
 // building a subject.
 func ValidID(id string) bool { return validID.MatchString(id) }
 
+// CheckName bounds player-supplied display text. Control characters are
+// rejected rather than stripped: they would break the telnet frames and ANSI
+// sequences every other player sees this name through.
+func CheckName(what, name string, limit int) error {
+	if name == "" {
+		return fmt.Errorf("missing %s", what)
+	}
+	if n := utf8.RuneCountInString(name); n > limit {
+		return fmt.Errorf("%s is %d characters, limit is %d", what, n, limit)
+	}
+	for _, r := range name {
+		if unicode.IsControl(r) {
+			return fmt.Errorf("%s contains a control character", what)
+		}
+	}
+	return nil
+}
+
 // Number parses an id that is a number, as sector and planet ids are. Only the
 // canonical spelling is accepted, so one thing cannot have two subjects.
 func Number(id string) (int, bool) {
@@ -58,6 +80,7 @@ func SectorSubject(sectorID string) string    { return "sector." + sectorID }
 func PortSubject(sectorID string) string      { return "port." + sectorID }
 func PlanetSubject(planetID string) string    { return "planet." + planetID }
 func AvatarSubject(avatarID string) string    { return "avatar." + avatarID }
+func PlayerSubject(playerID string) string    { return "player." + playerID }
 func PlanSubject(avatarID string) string      { return "plan." + avatarID }
 func DoctrineSubject(avatarID string) string  { return "doctrine." + avatarID }
 func DecisionsSubject(avatarID string) string { return "decisions." + avatarID }
@@ -84,7 +107,7 @@ func Ensure(ctx context.Context, js jetstream.JetStream, replicas int, tickPerio
 		},
 		{
 			Name:        StreamEvents,
-			Subjects:    []string{SectorEvents, PortEvents, PlanetEvents, AvatarEvents, PlanEvents, DoctrineEvents},
+			Subjects:    []string{SectorEvents, PortEvents, PlanetEvents, AvatarEvents, PlayerEvents, PlanEvents, DoctrineEvents},
 			Storage:     jetstream.FileStorage,
 			Compression: jetstream.S2Compression,
 			Replicas:    replicas,
@@ -121,7 +144,7 @@ func Ensure(ctx context.Context, js jetstream.JetStream, replicas int, tickPerio
 			return fmt.Errorf("stream %s: %w", cfg.Name, err)
 		}
 	}
-	for _, b := range []string{BucketSectorState, BucketActive, BucketDue, BucketAvatarStatus, BucketPortStatus, BucketLeaderboards, BucketDoctrine, BucketUniverse} {
+	for _, b := range []string{BucketSectorState, BucketActive, BucketDue, BucketAvatarStatus, BucketPortStatus, BucketLeaderboards, BucketDoctrine, BucketPlayerStatus, BucketUniverse} {
 		cfg := jetstream.KeyValueConfig{Bucket: b, Storage: jetstream.FileStorage, Replicas: replicas}
 		if _, err := js.CreateOrUpdateKeyValue(ctx, cfg); err != nil {
 			return fmt.Errorf("bucket %s: %w", b, err)

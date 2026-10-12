@@ -33,6 +33,8 @@ config :ueberauth, Ueberauth,
 
 config :libcluster, topologies: []
 
+config :no_carrier, players_service: NoCarrier.Players.Service.Nats
+
 # Configure esbuild (the version is required)
 config :esbuild,
   version: "0.25.4",

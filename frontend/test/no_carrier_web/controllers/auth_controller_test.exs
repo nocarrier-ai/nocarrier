@@ -1,7 +1,11 @@
 defmodule NoCarrierWeb.AuthControllerTest do
   use NoCarrierWeb.ConnCase
 
+  setup :start_players_service
+
+  alias NoCarrier.Players.Account
   alias NoCarrier.Players.Player
+  alias NoCarrier.Players.Service.Memory
   alias NoCarrierWeb.AuthController
 
   describe "GET /auth/:provider" do
@@ -20,15 +24,28 @@ defmodule NoCarrierWeb.AuthControllerTest do
   end
 
   describe "GET /auth/github/callback" do
-    test "logs the player in and sends them to the game", %{conn: conn} do
+    test "sends a first-time oauth ID to choose a display name", %{conn: conn} do
+      conn = complete_github_callback(conn)
+
+      assert redirected_to(conn) == ~p"/players/new"
+
+      assert %Account{login: "ada", oauth_id: %{provider: "github", uid: "42"}} =
+               get_session(conn, :pending_account)
+
+      refute get_session(conn, :player)
+    end
+
+    test "logs a returning player in and sends them to the game", %{conn: conn} do
+      register_player()
       conn = complete_github_callback(conn)
 
       assert redirected_to(conn) == ~p"/play"
-      assert %Player{id: "github:42", login: "ada"} = get_session(conn, :player)
-      assert Phoenix.Flash.get(conn.assigns.flash, :info) =~ "ada"
+      assert %Player{id: "p-ada", display_name: "Ada", login: "ada"} = get_session(conn, :player)
+      assert Phoenix.Flash.get(conn.assigns.flash, :info) =~ "Welcome back, Ada"
     end
 
     test "returns the player to the page they were refused", %{conn: conn} do
+      register_player()
       conn = get(conn, ~p"/play")
       assert redirected_to(conn) == ~p"/"
       assert get_session(conn, :player_return_to) == ~p"/play"
@@ -37,6 +54,15 @@ defmodule NoCarrierWeb.AuthControllerTest do
 
       assert redirected_to(conn) == ~p"/play"
       refute get_session(conn, :player_return_to)
+    end
+
+    test "reports an unreachable universe", %{conn: conn} do
+      Memory.fail_with(:unavailable)
+      conn = complete_github_callback(conn)
+
+      assert redirected_to(conn) == ~p"/"
+      assert Phoenix.Flash.get(conn.assigns.flash, :error) =~ "unreachable"
+      refute get_session(conn, :player)
     end
 
     test "reports a failed sign-in", %{conn: conn} do

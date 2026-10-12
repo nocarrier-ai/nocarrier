@@ -32,6 +32,7 @@ import (
 	"github.com/nocarrier-ai/nocarrier/internal/doctrine"
 	"github.com/nocarrier-ai/nocarrier/internal/loop"
 	"github.com/nocarrier-ai/nocarrier/internal/planet"
+	"github.com/nocarrier-ai/nocarrier/internal/player"
 	"github.com/nocarrier-ai/nocarrier/internal/port"
 	"github.com/nocarrier-ai/nocarrier/internal/projector"
 	"github.com/nocarrier-ai/nocarrier/internal/sector"
@@ -115,6 +116,10 @@ func run() error {
 	if err != nil {
 		return err
 	}
+	playerStatus, err := projector.NewPlayerStatus(ctx, js)
+	if err != nil {
+		return err
+	}
 	dispatcher := dispatch.New(js, active, dueAvatars, log)
 	pacer, err := clock.NewPacer(js, log, cfg.instanceID, universeCreated.TickPeriod, dispatcher)
 	if err != nil {
@@ -122,7 +127,8 @@ func run() error {
 	}
 	execPool := sector.NewPool(js, log, cfg.executeWorkers, toyResolver{})
 	decidePool := decide.NewPool(js, log, cfg.decideWorkers, notImplementedModel{})
-	services := service.New(nc, log, doctrine.NewHandler(js), avatar.NewHandler(js), port.NewHandler(js, u))
+	services := service.New(nc, log, doctrine.NewHandler(js), avatar.NewHandler(js), port.NewHandler(js, u),
+		player.NewHandler(js, playerStatus))
 
 	health := startHealth(cfg.httpAddr, nc, log)
 	defer func() {
@@ -138,6 +144,7 @@ func run() error {
 		projector.NewLoop(js, log, avatarStatus),
 		projector.NewLoop(js, log, dueAvatars),
 		projector.NewLoop(js, log, portStatus),
+		projector.NewLoop(js, log, playerStatus),
 	}
 	return loop.Supervise(ctx, log, loops...)
 }

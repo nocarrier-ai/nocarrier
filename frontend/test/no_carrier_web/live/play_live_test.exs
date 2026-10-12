@@ -12,7 +12,7 @@ defmodule NoCarrierWeb.PlayLiveTest do
     {:ok, view, _html} = conn |> log_in_player(player_fixture()) |> live(~p"/play")
 
     assert has_element?(view, "#play")
-    assert has_element?(view, "#play", "ada")
+    assert has_element?(view, "#play", "Admiral Ada")
     assert has_element?(view, "#flagship")
     assert has_element?(view, "#doctrine")
     assert has_element?(view, "#node-status")

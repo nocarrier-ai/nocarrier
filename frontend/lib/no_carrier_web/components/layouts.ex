@@ -26,25 +26,45 @@ defmodule NoCarrierWeb.Layouts do
                 Play
               </.link>
             </li>
-            <li class="hidden items-center gap-2 px-2 text-sm text-base-content/70 sm:flex">
-              <img
-                :if={@current_scope.player.avatar_url}
-                src={@current_scope.player.avatar_url}
-                width="24"
-                height="24"
-                alt=""
-                class="size-6"
-              />
-              <span>{@current_scope.player.login}</span>
-            </li>
-            <li>
-              <.link
-                href={~p"/log-out"}
-                method="delete"
-                class="btn btn-ghost btn-sm uppercase tracking-[0.2em]"
+            <li class="dropdown dropdown-end">
+              <div
+                id="player-menu-trigger"
+                tabindex="0"
+                role="button"
+                aria-haspopup="menu"
+                aria-controls="player-menu"
+                class="btn btn-ghost btn-sm gap-2 normal-case tracking-normal"
               >
-                Log out
-              </.link>
+                <img
+                  :if={@current_scope.player.avatar_url}
+                  src={@current_scope.player.avatar_url}
+                  width="24"
+                  height="24"
+                  alt=""
+                  class="size-6"
+                />
+                <span class="hidden text-base-content/70 sm:inline">
+                  {@current_scope.player.display_name}
+                </span>
+                <.icon name="hero-chevron-down" class="size-3 text-base-content/50" />
+              </div>
+              <ul
+                id="player-menu"
+                tabindex="0"
+                role="menu"
+                class="dropdown-content menu menu-sm mt-2 w-44 border border-base-300 bg-base-100 p-1 uppercase tracking-[0.2em] shadow-[0_0_18px_rgb(0_0_0/0.6)]"
+              >
+                <li>
+                  <.link id="settings-link" navigate={~p"/settings"} role="menuitem">
+                    <.icon name="hero-cog-6-tooth" class="size-4" /> Settings
+                  </.link>
+                </li>
+                <li>
+                  <.link id="log-out-link" href={~p"/log-out"} method="delete" role="menuitem">
+                    <.icon name="hero-arrow-right-start-on-rectangle" class="size-4" /> Log out
+                  </.link>
+                </li>
+              </ul>
             </li>
           <% else %>
             <li>

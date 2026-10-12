@@ -4,6 +4,8 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/nats-io/nats.go/jetstream"
+
 	"github.com/nocarrier-ai/nocarrier/internal/natstest"
 	"github.com/nocarrier-ai/nocarrier/internal/streams"
 )
@@ -83,6 +85,24 @@ func TestGuardIsPerSubject(t *testing.T) {
 	}
 	if _, err := streams.Append(ctx, js, streams.SectorSubject("s2"), event{}, 0); err != nil {
 		t.Fatalf("s2 with expected 0 after s1 append: %v", err)
+	}
+}
+
+func TestAppendWithMsgIDDeduplicates(t *testing.T) {
+	js := natstest.Start(t)
+	ctx := natstest.Context(t)
+
+	seq, err := streams.Append(ctx, js, streams.PlayerSubject("p1"), event{Tick: 1}, 0, jetstream.WithMsgID("once"))
+	if err != nil {
+		t.Fatalf("first append: %v", err)
+	}
+	again, err := streams.Append(ctx, js, streams.PlayerSubject("p2"), event{Tick: 2}, 0, jetstream.WithMsgID("once"))
+	if !errors.Is(err, streams.ErrDuplicate) || again != seq {
+		t.Fatalf("duplicate = %d, %v; want %d, ErrDuplicate", again, err, seq)
+	}
+	counts := natstest.SubjectCounts(t, js, streams.StreamEvents, streams.PlayerEvents)
+	if counts[streams.PlayerSubject("p1")] != 1 || counts[streams.PlayerSubject("p2")] != 0 {
+		t.Errorf("subjects = %v, want only p1", counts)
 	}
 }
 

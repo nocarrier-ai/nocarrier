@@ -16,6 +16,7 @@ import (
 
 	"github.com/nocarrier-ai/nocarrier/internal/avatar"
 	"github.com/nocarrier-ai/nocarrier/internal/doctrine"
+	"github.com/nocarrier-ai/nocarrier/internal/player"
 	"github.com/nocarrier-ai/nocarrier/internal/port"
 	"github.com/nocarrier-ai/nocarrier/internal/streams"
 	"github.com/nocarrier-ai/nocarrier/internal/universe"
@@ -33,6 +34,10 @@ type AdmiralCommissioner interface {
 
 type PortTrader interface {
 	Trade(ctx context.Context, cmd port.Trade) (port.TradeCompleted, error)
+}
+
+type PlayerCreator interface {
+	Create(ctx context.Context, cmd player.CreatePlayer) (player.PlayerCreated, error)
 }
 
 type DoctrineUpdateReply struct {
@@ -61,16 +66,24 @@ type PortTradeReply struct {
 	Tick      int64              `json:"tick"`
 }
 
+type PlayerCreateReply struct {
+	PlayerID    string `json:"player_id"`
+	DisplayName string `json:"display_name"`
+	DialInCode  string `json:"dial_in_code"`
+	Tick        int64  `json:"tick"`
+}
+
 type Services struct {
 	nc       *nats.Conn
 	log      *slog.Logger
 	doctrine DoctrineUpdater
 	avatars  AdmiralCommissioner
 	ports    PortTrader
+	players  PlayerCreator
 }
 
-func New(nc *nats.Conn, log *slog.Logger, d DoctrineUpdater, a AdmiralCommissioner, p PortTrader) *Services {
-	return &Services{nc: nc, log: log.With("loop", "services"), doctrine: d, avatars: a, ports: p}
+func New(nc *nats.Conn, log *slog.Logger, d DoctrineUpdater, a AdmiralCommissioner, p PortTrader, pl PlayerCreator) *Services {
+	return &Services{nc: nc, log: log.With("loop", "services"), doctrine: d, avatars: a, ports: p, players: pl}
 }
 
 func (s *Services) Name() string { return "services" }
@@ -100,6 +113,11 @@ func (s *Services) Run(ctx context.Context) error {
 	portTrade := func(req micro.Request) { s.portTrade(ctx, req) }
 	if err := grp.AddEndpoint("port-trade", micro.HandlerFunc(portTrade),
 		micro.WithEndpointSubject("port.trade")); err != nil {
+		return fmt.Errorf("endpoint: %w", err)
+	}
+	playerCreate := func(req micro.Request) { s.playerCreate(ctx, req) }
+	if err := grp.AddEndpoint("player-create", micro.HandlerFunc(playerCreate),
+		micro.WithEndpointSubject("player.create")); err != nil {
 		return fmt.Errorf("endpoint: %w", err)
 	}
 
@@ -205,6 +223,36 @@ func (s *Services) portTrade(ctx context.Context, req micro.Request) {
 	default:
 		s.log.Error("port trade", "sector_id", cmd.SectorID, "err", err)
 		_ = req.Error("500", "trade failed", nil)
+	}
+}
+
+func (s *Services) playerCreate(ctx context.Context, req micro.Request) {
+	var cmd player.CreatePlayer
+	if err := json.Unmarshal(req.Data(), &cmd); err != nil {
+		_ = req.Error("400", "malformed player creation: "+err.Error(), nil)
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(ctx, requestTimeout)
+	defer cancel()
+	ev, err := s.players.Create(ctx, cmd)
+	switch {
+	case err == nil:
+		_ = req.RespondJSON(PlayerCreateReply{
+			PlayerID:    ev.PlayerID,
+			DisplayName: ev.DisplayName,
+			DialInCode:  ev.DialInCode,
+			Tick:        ev.Tick,
+		})
+	case errors.Is(err, player.ErrInvalid):
+		_ = req.Error("400", err.Error(), nil)
+	case errors.Is(err, player.ErrAlreadyRegistered):
+		_ = req.Error("409", "player already registered for that oauth id", nil)
+	case errors.Is(err, player.ErrAlreadyExists):
+		_ = req.Error("409", "player id already exists", nil)
+	default:
+		s.log.Error("player create", "player_id", cmd.PlayerID, "oauth_provider", cmd.OAuthID.Provider, "oauth_uid", cmd.OAuthID.UID, "err", err)
+		_ = req.Error("500", "player creation failed", nil)
 	}
 }
 

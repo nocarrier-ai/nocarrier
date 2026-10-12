@@ -36,6 +36,10 @@ Strict event sourcing terms apply throughout.
     colonists. Colonies and what is on the surface come later.
   - **avatar** — the fleet admiral: identity and lifecycle, with doctrine and plan on
     their own subjects.
+  - **player** — the person behind the admiral: born on `PlayerCreated` with the
+    OAuth ID they signed in with, the display name they chose, and their dial-in
+    code for the telnet relay. Player IDs are opaque; the OAuth ID is never a
+    subject token, so it never leaks through one.
   Cross-aggregate effects are never a second write. A trade is one event on the
   port; the ship's cargo and credits are projections of it.
 - **Projection**: a fold over event streams into a read model (KV bucket). Every read
@@ -195,6 +199,7 @@ Event streams (file storage, S2 compression where large, AllowDirect):
               ship.<ship_id>          (planned)
               planet.<planet_id>      PlanetCreated (ids assigned at the big bang; Terra is 1)
               avatar.<avatar_id>      AdmiralCommissioned, later lifecycle
+              player.<player_id>      PlayerCreated
               plan.<avatar_id>        PlanRevised
               doctrine.<avatar_id>    DoctrineUpdated
 - `DECISIONS` decisions.<avatar_id>   decision records; MaxMsgsPerSubject caps
@@ -221,24 +226,28 @@ KV buckets (all rebuildable by replay):
 - `port-status`     Phoenix-facing books per port; see Projections
 - `leaderboards`    Phoenix-facing rankings
 - `doctrine`        Phoenix-facing latest doctrine per avatar
+- `player-status`   Phoenix-facing player per player ID, plus an OAuth ID index
 
 ## Projections
 
 Each projection is one sequential durable consumer (`MaxAckPending` 1) on
 `EVENTS`, filtered to the aggregate kinds it folds, so it sees a single
-ordered sequence across aggregates. Every entry stores its value together with
-the last applied stream sequence, or the aggregate's revision when each event
-carries the aggregate's full state. A redelivered or replayed event at or below
-the stored value is skipped. One consumer means one writer per entry, so a
-write is a single revision-checked update; a conflict naks and the redelivery
-re-reads. This is what keeps projections idempotent while events stay deltas.
+ordered sequence across aggregates. Entries carry no stream bookkeeping.
+JetStream delivers in order and redelivers only what was not acked, so every
+fold is written to land on the same value when the same event arrives twice: a
+KV create for an entry that is only ever created (refused atomically when the
+key exists), a replace when the event carries the aggregate's full state, and
+a monotonic `max` for progress and schedules. One consumer means one writer
+per entry, so a write that follows a read is a single revision-checked update;
+a conflict naks and the redelivery re-reads. This is what keeps projections
+idempotent while events stay deltas.
 
 Projections switch on the event type and decode into the owning aggregate's
 event struct. Nothing reacts to an event by sending a command: cross-aggregate
 effects are projection updates that the tick dispatcher reads.
 
 `active-sectors` (implemented) is the dispatcher's execute-side read model. It
-folds `sector.*` and `avatar.*`. Entry per sector: `{last_resolved, seq}`.
+folds `sector.*` and `avatar.*`. Entry per sector: `{last_resolved}`.
 
 TickResolved advances
 `last_resolved` and deletes the entry when pending is false. 
@@ -281,13 +290,22 @@ where the flagship started. What a player watches change — position, cargo,
 condition, credits — is the ship aggregate's state, which this projection does
 not fold yet.
 
+`player-status` (implemented) folds `player.*` into the `player-status` bucket.
+`PlayerCreated` writes two keys: the player under `<player_id>` (OAuth ID,
+display name, dial-in code, creation tick) and an index entry under
+`oauth.<provider>.<uid>` holding the player ID. Both writes are KV creates,
+so the first player created for an OAuth ID is that account's player: a
+later event for the same OAuth ID never moves the index. Phoenix answers "have we seen this OAuth ID?" with one
+read of the index key and loads the player with a second. The command handler
+reads the same index to refuse a second player for an OAuth ID (see Services).
+
 `port-status` (implemented) folds `port.*` into the `port-status` bucket, keyed
 by sector. `PortCreated` makes the entry — the terms per commodity with
 everything at capacity — and every port event carries the port's state after
-it, so the fold replaces the entry, guarded by `seq`.
+it, so the fold replaces the entry.
 
 `due-avatars` (implemented) is the dispatcher's decide-side read model. It folds
-`avatar.*` and `plan.*`. Entry per avatar: `{next_tick, seq}`.
+`avatar.*` and `plan.*`. Entry per avatar: `{next_tick}`.
 AdmiralCommissioned schedules the admiral on its commissioning tick (a new
 admiral has no plan yet), and PlanRevised pushes `next_tick` out by the cadence.
 Nothing records that a DecideNow was *dispatched*, only that a decision landed,
@@ -320,6 +338,15 @@ enforce this. The contract is:
   "resubmit". Every admiral spawns in sector 0; a real spawn picked from the
   universe map is a TODO, as is the starting loadout, which no event carries
   until there are economy rules to set it by.
+  cmd.player.create -> validate -> append PlayerCreated -> reply with
+  `{player_id, display_name, dial_in_code, tick}`. Phoenix sends it the first
+  time an OAuth ID signs in, after asking the player what name to display, with
+  the player ID and dial-in code it generated. The OAuth ID is not the subject,
+  so create-once is two guards: the handler refuses an OAuth ID the
+  `player-status` index already holds, and the append's `Nats-Msg-Id` is the
+  OAuth ID, so two creates racing inside the projection's lag deduplicate on
+  the stream. An invalid command replies 400; an OAuth ID or player ID that
+  already exists replies 409, permanent: Phoenix looks the player up instead.
   cmd.port.trade -> validate against the port's books -> append TradeCompleted
   -> reply with `{sector_id, ship_id, commodity, units, available, tick}`.
   The port is the last event on `port.<sector_id>` — `PortCreated` at the big

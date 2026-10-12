@@ -52,7 +52,7 @@
 
   <.prompt>
     <%= if @current_scope do %>
-      CONNECT 2400 · admiral {@current_scope.player.login} standing by
+      CONNECT 2400 · admiral {@current_scope.player.display_name} standing by
     <% else %>
       NO CARRIER · sign in to reconnect
     <% end %>

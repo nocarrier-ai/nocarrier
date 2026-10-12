@@ -28,8 +28,7 @@ const cadence = 1
 // winner dispatches it again. That is the same straggler recovery the execute
 // side gets from active-sectors.
 type DueEntry struct {
-	NextTick int64  `json:"next_tick"`
-	Seq      uint64 `json:"seq"`
+	NextTick int64 `json:"next_tick"`
 }
 
 // DueAvatars folds avatar lifecycle and plan events into the due-avatars
@@ -85,10 +84,6 @@ func (d *DueAvatars) Apply(ctx context.Context, msg jetstream.Msg) error {
 	if f == nil {
 		return nil
 	}
-	md, err := msg.Metadata()
-	if err != nil {
-		return err
-	}
 
 	var (
 		e      DueEntry
@@ -106,13 +101,9 @@ func (d *DueAvatars) Apply(ctx context.Context, msg jetstream.Msg) error {
 	case !errors.Is(err, jetstream.ErrKeyNotFound):
 		return err
 	}
-	if md.Sequence.Stream <= e.Seq {
-		return nil
-	}
 	if !f(&e, exists) {
 		return nil
 	}
-	e.Seq = md.Sequence.Stream
 
 	data, err := json.Marshal(e)
 	if err != nil {

@@ -12,16 +12,13 @@ import (
 	"github.com/nocarrier-ai/nocarrier/internal/streams"
 )
 
-// StatusEntry is the Phoenix-facing current state of one fleet admiral. Seq
-// is the stream sequence of the last event folded in, so a redelivery or a
-// replay at or below it is skipped.
+// StatusEntry is the Phoenix-facing current state of one fleet admiral.
 type StatusEntry struct {
 	AvatarID         string `json:"avatar_id"`
 	Name             string `json:"name"`
 	ShipName         string `json:"ship_name"`
 	Sector           string `json:"sector"`
 	CommissionedTick int64  `json:"commissioned_tick"`
-	Seq              uint64 `json:"seq"`
 }
 
 // AvatarStatus folds avatar lifecycle events into the avatar-status bucket.
@@ -68,28 +65,6 @@ func (a *AvatarStatus) Apply(ctx context.Context, msg jetstream.Msg) error {
 	if !ok {
 		return nil
 	}
-	md, err := msg.Metadata()
-	if err != nil {
-		return err
-	}
-
-	var (
-		stored StatusEntry
-		rev    uint64
-	)
-	entry, err := a.kv.Get(ctx, ev.AvatarID)
-	switch {
-	case err == nil:
-		if err := json.Unmarshal(entry.Value(), &stored); err != nil {
-			return fmt.Errorf("entry %s: %w", ev.AvatarID, err)
-		}
-		rev = entry.Revision()
-	case !errors.Is(err, jetstream.ErrKeyNotFound):
-		return err
-	}
-	if md.Sequence.Stream <= stored.Seq {
-		return nil
-	}
 
 	data, err := json.Marshal(StatusEntry{
 		AvatarID:         ev.AvatarID,
@@ -97,15 +72,13 @@ func (a *AvatarStatus) Apply(ctx context.Context, msg jetstream.Msg) error {
 		ShipName:         ev.ShipName,
 		Sector:           ev.HomeSector,
 		CommissionedTick: ev.Tick,
-		Seq:              md.Sequence.Stream,
 	})
 	if err != nil {
 		return err
 	}
-	if rev == 0 {
-		_, err = a.kv.Create(ctx, ev.AvatarID, data)
-	} else {
-		_, err = a.kv.Update(ctx, ev.AvatarID, data, rev)
+	_, err = a.kv.Create(ctx, ev.AvatarID, data)
+	if errors.Is(err, jetstream.ErrKeyExists) {
+		return nil
 	}
 	return err
 }

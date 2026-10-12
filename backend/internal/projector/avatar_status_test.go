@@ -68,7 +68,6 @@ func TestAvatarStatusProjection(t *testing.T) {
 				t.Fatalf("read: %v", err)
 			}
 			got = e
-			want.Seq = e.Seq
 			return ok && e == want
 		})
 		return got
@@ -82,9 +81,6 @@ func TestAvatarStatusProjection(t *testing.T) {
 		Sector:           avatar.StartingSector,
 		CommissionedTick: 4,
 	})
-	if got.Seq == 0 {
-		t.Error("entry recorded no stream sequence")
-	}
 
 	// Events this projection does not fold must leave the entry alone.
 	natstest.Publish(t, js, streams.AvatarSubject("a1"), map[string]any{"type": "Nope", "avatar_id": "a1"})
@@ -114,8 +110,6 @@ func TestAvatarStatusMissingAvatar(t *testing.T) {
 	}
 }
 
-// A replay delivers the same event at the same stream sequence, which the
-// stored Seq has to skip rather than rewrite.
 func TestAvatarStatusSkipsRedelivery(t *testing.T) {
 	js := natstest.Start(t)
 	ctx := natstest.Context(t)

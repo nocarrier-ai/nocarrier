@@ -9,8 +9,6 @@ import (
 	"errors"
 	"fmt"
 	"strings"
-	"unicode"
-	"unicode/utf8"
 
 	"github.com/nats-io/nats.go/jetstream"
 
@@ -111,25 +109,9 @@ func (c CommissionAdmiral) validate() error {
 	if !streams.ValidID(c.AvatarID) {
 		return fmt.Errorf("%w: avatar ID %q may only contain letters, digits, '-' and '_'", ErrInvalid, c.AvatarID)
 	}
-	if err := checkName("admiral name", c.Name); err != nil {
-		return err
-	}
-	return checkName("flagship name", c.ShipName)
-}
-
-// checkName bounds player-supplied display text. Control characters are
-// rejected rather than stripped: they would break the telnet frames and ANSI
-// sequences every other player sees this name through.
-func checkName(what, name string) error {
-	if name == "" {
-		return fmt.Errorf("%w: missing %s", ErrInvalid, what)
-	}
-	if n := utf8.RuneCountInString(name); n > nameLimit {
-		return fmt.Errorf("%w: %s is %d characters, limit is %d", ErrInvalid, what, n, nameLimit)
-	}
-	for _, r := range name {
-		if unicode.IsControl(r) {
-			return fmt.Errorf("%w: %s contains a control character", ErrInvalid, what)
+	for what, name := range map[string]string{"admiral name": c.Name, "flagship name": c.ShipName} {
+		if err := streams.CheckName(what, name, nameLimit); err != nil {
+			return fmt.Errorf("%w: %v", ErrInvalid, err)
 		}
 	}
 	return nil

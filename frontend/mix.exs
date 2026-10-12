@@ -70,6 +70,7 @@ defmodule NoCarrier.MixProject do
       {:horde, "~> 0.10.0"},
       {:ueberauth, "~> 0.10.8"},
       {:ueberauth_github, "~> 0.8.3"},
+      {:gnat, "~> 1.18"},
       {:bandit, "~> 1.5"}
     ]
   end

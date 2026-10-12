@@ -91,7 +91,6 @@ func TestPortStatusProjection(t *testing.T) {
 				t.Fatalf("read: %v", err)
 			}
 			got = e
-			want.Seq = e.Seq
 			return ok && e == want
 		})
 		return got
@@ -99,14 +98,11 @@ func TestPortStatusProjection(t *testing.T) {
 
 	// PortCreated makes the entry: the terms, everything at capacity.
 	natstest.Publish(t, js, streams.PortSubject("1"), portCreated("1", sellsTwo))
-	created := waitFor("1", PortStatusEntry{SectorID: "1", Commodities: [3]CommodityStatus{
+	waitFor("1", PortStatusEntry{SectorID: "1", Commodities: [3]CommodityStatus{
 		{Sells: true, Capacity: 1000, Available: 1000},
 		{Sells: false, Capacity: 2000, Available: 2000},
 		{Sells: true, Capacity: 3000, Available: 3000},
 	}})
-	if created.Seq == 0 {
-		t.Error("entry recorded no stream sequence")
-	}
 
 	natstest.Publish(t, js, streams.PortSubject("1"), traded("1", universe.FuelOre, 100, port.Available{900, 2000, 3000}))
 	got := waitFor("1", PortStatusEntry{SectorID: "1", Commodities: [3]CommodityStatus{
@@ -114,9 +110,6 @@ func TestPortStatusProjection(t *testing.T) {
 		{Sells: false, Capacity: 2000, Available: 2000},
 		{Sells: true, Capacity: 3000, Available: 3000},
 	}})
-	if got.Seq <= created.Seq {
-		t.Errorf("seq %d after trade, want past the creation's %d", got.Seq, created.Seq)
-	}
 
 	// Events this projection does not fold must leave the entry alone.
 	natstest.Publish(t, js, streams.PortSubject("1"), map[string]any{"type": "Nope", "sector_id": "1"})

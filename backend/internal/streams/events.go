@@ -9,7 +9,10 @@ import (
 	"github.com/nats-io/nats.go/jetstream"
 )
 
-var ErrConflict = errors.New("subject moved past expected sequence")
+var (
+	ErrConflict  = errors.New("subject moved past expected sequence")
+	ErrDuplicate = errors.New("message id already appended")
+)
 
 func Last(ctx context.Context, js jetstream.JetStream, stream, subject string, v any) (uint64, error) {
 	s, err := js.Stream(ctx, stream)
@@ -29,18 +32,22 @@ func Last(ctx context.Context, js jetstream.JetStream, stream, subject string, v
 	return raw.Sequence, nil
 }
 
-func Append(ctx context.Context, js jetstream.JetStream, subject string, v any, expected uint64) (uint64, error) {
+func Append(ctx context.Context, js jetstream.JetStream, subject string, v any, expected uint64, opts ...jetstream.PublishOpt) (uint64, error) {
 	data, err := json.Marshal(v)
 	if err != nil {
 		return 0, err
 	}
-	ack, err := js.Publish(ctx, subject, data, jetstream.WithExpectLastSequencePerSubject(expected))
+	opts = append([]jetstream.PublishOpt{jetstream.WithExpectLastSequencePerSubject(expected)}, opts...)
+	ack, err := js.Publish(ctx, subject, data, opts...)
 	if err != nil {
 		var apiErr *jetstream.APIError
 		if errors.As(err, &apiErr) && apiErr.ErrorCode == jetstream.JSErrCodeStreamWrongLastSequence {
 			return 0, ErrConflict
 		}
 		return 0, err
+	}
+	if ack.Duplicate {
+		return ack.Sequence, ErrDuplicate
 	}
 	return ack.Sequence, nil
 }

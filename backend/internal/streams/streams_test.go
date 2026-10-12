@@ -20,6 +20,7 @@ func TestSubjectsRouteToStreams(t *testing.T) {
 		{streams.PortSubject("7"), streams.StreamEvents},
 		{streams.PlanetSubject("1"), streams.StreamEvents},
 		{streams.AvatarSubject("a1"), streams.StreamEvents},
+		{streams.PlayerSubject("p1"), streams.StreamEvents},
 		{streams.PlanSubject("a1"), streams.StreamEvents},
 		{streams.DoctrineSubject("a1"), streams.StreamEvents},
 		{streams.DecisionsSubject("a1"), streams.StreamDecisions},
@@ -44,6 +45,7 @@ func TestEventsRejectsMultiTokenIDs(t *testing.T) {
 	for _, subject := range []string{
 		streams.SectorSubject("a.b"),
 		streams.AvatarSubject("a.b"),
+		streams.PlayerSubject("a.b"),
 		streams.PlanSubject("a.b"),
 		streams.DoctrineSubject("a.b"),
 	} {

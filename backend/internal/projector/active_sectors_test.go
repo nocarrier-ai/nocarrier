@@ -70,22 +70,20 @@ func TestStep(t *testing.T) {
 		name   string
 		e      ActiveEntry
 		exists bool
-		seq    uint64
 		f      fold
 		want   ActiveEntry
 		wantOp op
 	}{
-		{"create", ActiveEntry{LastResolved: -1}, false, 3, keep(0), ActiveEntry{LastResolved: 0, Seq: 3}, opPut},
-		{"advance", ActiveEntry{LastResolved: 4, Seq: 3}, true, 9, keep(5), ActiveEntry{LastResolved: 5, Seq: 9}, opPut},
-		{"never regress", ActiveEntry{LastResolved: 4, Seq: 3}, true, 9, keep(2), ActiveEntry{LastResolved: 4, Seq: 9}, opPut},
-		{"delete", ActiveEntry{LastResolved: 4, Seq: 3}, true, 9, drop, ActiveEntry{LastResolved: 4, Seq: 9}, opDelete},
-		{"nothing to delete", ActiveEntry{LastResolved: -1}, false, 9, drop, ActiveEntry{LastResolved: -1, Seq: 9}, opSkip},
-		{"redelivery", ActiveEntry{LastResolved: 4, Seq: 9}, true, 9, keep(5), ActiveEntry{LastResolved: 4, Seq: 9}, opSkip},
-		{"older event", ActiveEntry{LastResolved: 4, Seq: 9}, true, 7, keep(5), ActiveEntry{LastResolved: 4, Seq: 9}, opSkip},
+		{"create", ActiveEntry{LastResolved: -1}, false, keep(0), ActiveEntry{LastResolved: 0}, opPut},
+		{"advance", ActiveEntry{LastResolved: 4}, true, keep(5), ActiveEntry{LastResolved: 5}, opPut},
+		{"never regress", ActiveEntry{LastResolved: 4}, true, keep(2), ActiveEntry{LastResolved: 4}, opPut},
+		{"redelivered tick lands on the same value", ActiveEntry{LastResolved: 5}, true, keep(5), ActiveEntry{LastResolved: 5}, opPut},
+		{"delete", ActiveEntry{LastResolved: 4}, true, drop, ActiveEntry{LastResolved: 4}, opDelete},
+		{"nothing to delete", ActiveEntry{LastResolved: -1}, false, drop, ActiveEntry{LastResolved: -1}, opSkip},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			got, o := step(c.e, c.exists, c.seq, c.f)
+			got, o := step(c.e, c.exists, c.f)
 			if got != c.want || o != c.wantOp {
 				t.Errorf("step = %+v, %v; want %+v, %v", got, o, c.want, c.wantOp)
 			}

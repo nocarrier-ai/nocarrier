@@ -19,11 +19,27 @@ defmodule NoCarrierWeb.AuthController do
   end
 
   def callback(%{assigns: %{ueberauth_auth: auth}} = conn, _params) do
-    player = Players.player_from_auth(auth)
+    account = Players.account_from_auth(auth)
 
-    conn
-    |> put_flash(:info, "Carrier detected. Welcome aboard, #{player.login}.")
-    |> PlayerAuth.log_in_player(player)
+    case Players.find_player(account) do
+      {:ok, player} ->
+        conn
+        |> put_flash(:info, "Carrier detected. Welcome back, #{player.display_name}.")
+        |> PlayerAuth.log_in_player(player)
+
+      :not_found ->
+        conn
+        |> put_session(:pending_account, account)
+        |> redirect(to: ~p"/players/new")
+
+      {:error, _reason} ->
+        conn
+        |> put_flash(
+          :error,
+          "Carrier detected, but the universe is unreachable. Try again in a moment."
+        )
+        |> redirect(to: ~p"/")
+    end
   end
 
   def delete(conn, _params) do

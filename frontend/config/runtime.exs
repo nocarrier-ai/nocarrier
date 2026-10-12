@@ -81,3 +81,16 @@ if config_env() == :prod do
     http: [ip: {0, 0, 0, 0, 0, 0, 0, 0}],
     secret_key_base: secret_key_base
 end
+
+if config_env() != :test do
+  if config_env() == :prod and is_nil(System.get_env("NATS_URL")) do
+    raise """
+    environment variable NATS_URL is missing.
+    Phoenix reaches the universe over NATS, for example nats://nats.internal:4222
+    """
+  end
+
+  config :no_carrier, NoCarrier.Nats,
+    url: System.get_env("NATS_URL") || "nats://127.0.0.1:4222",
+    creds: System.get_env("NATS_CREDS")
+end

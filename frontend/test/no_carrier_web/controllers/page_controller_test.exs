@@ -13,7 +13,7 @@ defmodule NoCarrierWeb.PageControllerTest do
     html = conn |> log_in_player(player_fixture()) |> get(~p"/") |> html_response(200)
 
     assert html =~ ~s(id="enter-game")
-    assert html =~ "ada"
+    assert html =~ "admiral Ada"
     refute html =~ ~s(id="sign-in")
   end
 end

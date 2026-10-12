@@ -4,6 +4,7 @@ defmodule NoCarrierWeb.PlayerAuth do
   import Plug.Conn
   import Phoenix.Controller
 
+  alias NoCarrier.Players
   alias NoCarrier.Players.Scope
 
   @login_required_message "Sign in to reach your admiral."
@@ -29,7 +30,9 @@ defmodule NoCarrierWeb.PlayerAuth do
   end
 
   def fetch_current_scope_for_player(conn, _opts) do
-    assign(conn, :current_scope, Scope.for_player(get_session(conn, :player)))
+    player = Players.player_from_session(get_session(conn, :player))
+    conn = if player, do: conn, else: delete_session(conn, :player)
+    assign(conn, :current_scope, Scope.for_player(player))
   end
 
   def on_mount(:mount_current_scope, _params, session, socket) do
@@ -67,7 +70,7 @@ defmodule NoCarrierWeb.PlayerAuth do
 
   defp mount_current_scope(socket, session) do
     Phoenix.Component.assign_new(socket, :current_scope, fn ->
-      Scope.for_player(session["player"])
+      Scope.for_player(Players.player_from_session(session["player"]))
     end)
   end
 

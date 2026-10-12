@@ -13,7 +13,7 @@ defmodule NoCarrierWeb.PlayLive do
       <div id="play" class="space-y-8">
         <.header>
           <span class="text-primary glow uppercase tracking-[0.2em]">
-            Admiral {@current_scope.player.login}
+            Admiral {@current_scope.player.display_name}
           </span>
           <:subtitle>Flagship standing by. No standing orders on file.</:subtitle>
           <:actions>
