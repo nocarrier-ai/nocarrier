@@ -226,7 +226,7 @@ KV buckets (all rebuildable by replay):
 - `port-status`     Phoenix-facing books per port; see Projections
 - `leaderboards`    Phoenix-facing rankings
 - `doctrine`        Phoenix-facing latest doctrine per avatar
-- `player-status`   Phoenix-facing player per player ID, plus an OAuth ID index
+- `player-status`   Phoenix-facing player per player ID, plus OAuth ID and dial-in code indexes
 
 ## Projections
 
@@ -291,13 +291,15 @@ condition, credits — is the ship aggregate's state, which this projection does
 not fold yet.
 
 `player-status` (implemented) folds `player.*` into the `player-status` bucket.
-`PlayerCreated` writes two keys: the player under `<player_id>` (OAuth ID,
-display name, dial-in code, creation tick) and an index entry under
-`oauth.<provider>.<uid>` holding the player ID. Both writes are KV creates,
-so the first player created for an OAuth ID is that account's player: a
-later event for the same OAuth ID never moves the index. Phoenix answers "have we seen this OAuth ID?" with one
-read of the index key and loads the player with a second. The command handler
-reads the same index to refuse a second player for an OAuth ID (see Services).
+`PlayerCreated` writes three keys: the player under `<player_id>` (OAuth ID,
+display name, dial-in code, creation tick) and index entries under
+`oauth.<provider>.<uid>` and `dial-in.<code>`, each holding the player ID. All
+three writes are KV creates, so the first player created for an OAuth ID is
+that account's player: a later event for the same OAuth ID never moves the
+index. Phoenix answers "have we seen this OAuth ID?" with one read of the
+index key and loads the player with a second; the telnet relay resolves a
+dial-in code the same way. The command handler reads the OAuth index to refuse
+a second player for an OAuth ID (see Services).
 
 `port-status` (implemented) folds `port.*` into the `port-status` bucket, keyed
 by sector. `PortCreated` makes the entry — the terms per commodity with
@@ -356,6 +358,11 @@ enforce this. The contract is:
   more than the port can fill 422, a lost race 409 (resubmit). Regeneration
   toward capacity is a separate command the port resolves on its tick, not
   yet implemented.
+- **Status**: request/reply to the query micro service.
+  query.universe.status replies `{seed, sectors, tick, tick_period_ms, ports,
+  planets, players}`: the stored map's seed and size, the clock's last tick,
+  and the count of each aggregate's subjects on EVENTS. The telnet relay shows
+  it on dial-in. A universe with no clock replies 500.
 - **Current state**: read KV buckets directly; KV watches drive live updates.
 - **History**: request/reply to the query micro service, e.g.
   query.decisions.page reads decisions.<avatar_id> by time window with an

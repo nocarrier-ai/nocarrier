@@ -10,8 +10,13 @@ defmodule NoCarrier.Players.Service.Nats do
   @error_header "nats-service-error"
 
   @impl true
-  def lookup_player(%OAuthID{} = oauth_id) do
-    with {:ok, %{"player_id" => player_id}} <- read(OAuthID.key(oauth_id)),
+  def lookup_player(%OAuthID{} = oauth_id), do: lookup(OAuthID.key(oauth_id))
+
+  @impl true
+  def lookup_player_by_dial_in_code(code), do: lookup("dial-in." <> code)
+
+  defp lookup(index_key) do
+    with {:ok, %{"player_id" => player_id}} <- read(index_key),
          {:ok, entry} <- read(player_id) do
       decode_entry(entry)
     else

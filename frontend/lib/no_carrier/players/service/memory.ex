@@ -6,22 +6,17 @@ defmodule NoCarrier.Players.Service.Memory do
   alias NoCarrier.Players.OAuthID
 
   def start_link(_opts \\ []) do
-    Agent.start_link(fn -> %{players: %{}, by_oauth: %{}, failure: nil} end, name: __MODULE__)
+    Agent.start_link(
+      fn -> %{players: %{}, by_oauth: %{}, by_dial_in: %{}, failure: nil} end,
+      name: __MODULE__
+    )
   end
 
   @impl true
-  def lookup_player(%OAuthID{} = oauth_id) do
-    Agent.get(__MODULE__, fn
-      %{failure: failure} when not is_nil(failure) ->
-        {:error, failure}
+  def lookup_player(%OAuthID{} = oauth_id), do: lookup(:by_oauth, OAuthID.key(oauth_id))
 
-      state ->
-        case Map.fetch(state.by_oauth, OAuthID.key(oauth_id)) do
-          {:ok, player_id} -> {:ok, Map.fetch!(state.players, player_id)}
-          :error -> :not_found
-        end
-    end)
-  end
+  @impl true
+  def lookup_player_by_dial_in_code(code), do: lookup(:by_dial_in, code)
 
   @impl true
   def create_player(command) do
@@ -46,7 +41,8 @@ defmodule NoCarrier.Players.Service.Memory do
            %{
              state
              | players: Map.put(state.players, command.player_id, entry),
-               by_oauth: Map.put(state.by_oauth, key, command.player_id)
+               by_oauth: Map.put(state.by_oauth, key, command.player_id),
+               by_dial_in: Map.put(state.by_dial_in, command.dial_in_code, command.player_id)
            }}
       end
     end)
@@ -58,5 +54,18 @@ defmodule NoCarrier.Players.Service.Memory do
 
   def players do
     Agent.get(__MODULE__, &Map.values(&1.players))
+  end
+
+  defp lookup(index, key) do
+    Agent.get(__MODULE__, fn
+      %{failure: failure} when not is_nil(failure) ->
+        {:error, failure}
+
+      state ->
+        case Map.fetch(Map.fetch!(state, index), key) do
+          {:ok, player_id} -> {:ok, Map.fetch!(state.players, player_id)}
+          :error -> :not_found
+        end
+    end)
   end
 end

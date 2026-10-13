@@ -128,7 +128,7 @@ func run() error {
 	execPool := sector.NewPool(js, log, cfg.executeWorkers, toyResolver{})
 	decidePool := decide.NewPool(js, log, cfg.decideWorkers, notImplementedModel{})
 	services := service.New(nc, log, doctrine.NewHandler(js), avatar.NewHandler(js), port.NewHandler(js, u),
-		player.NewHandler(js, playerStatus))
+		player.NewHandler(js, playerStatus), service.NewUniverseStatusReader(js, u, universeCreated.TickPeriod))
 
 	health := startHealth(cfg.httpAddr, nc, log)
 	defer func() {
@@ -217,11 +217,11 @@ func ensureUniverse(ctx context.Context, js jetstream.JetStream, cfg config, rep
 		return fail(fmt.Errorf("clock says universe seed %d but the stored map is seed %d",
 			created.Seed, stored.Seed))
 	}
-	ports, err := subjectCount(ctx, js, streams.PortEvents)
+	ports, err := streams.SubjectCount(ctx, js, streams.PortEvents)
 	if err != nil {
 		return fail(err)
 	}
-	planets, err := subjectCount(ctx, js, streams.PlanetEvents)
+	planets, err := streams.SubjectCount(ctx, js, streams.PlanetEvents)
 	if err != nil {
 		return fail(err)
 	}
@@ -301,20 +301,6 @@ func universeCreated(ctx context.Context, js jetstream.JetStream) (clock.Univers
 		return clock.UniverseCreated{}, false, errors.New("first clock event is not UniverseCreated")
 	}
 	return existing, true, nil
-}
-
-// subjectCount counts the aggregates of one kind: the subjects on EVENTS that
-// match the filter.
-func subjectCount(ctx context.Context, js jetstream.JetStream, filter string) (int, error) {
-	s, err := js.Stream(ctx, streams.StreamEvents)
-	if err != nil {
-		return 0, err
-	}
-	info, err := s.Info(ctx, jetstream.WithSubjectFilter(filter))
-	if err != nil {
-		return 0, fmt.Errorf("count %s: %w", filter, err)
-	}
-	return len(info.State.Subjects), nil
 }
 
 func startHealth(addr string, nc *nats.Conn, log *slog.Logger) *http.Server {

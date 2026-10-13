@@ -20,6 +20,8 @@ root module is `NoCarrier`.
 | `GET /play`                 | signed in | The game (placeholder)                        |
 | `GET /settings`             | signed in | The player's dial-in code for telnet          |
 
+The telnet relay listens beside the web app; see below.
+
 Sign-in is handled by [Ueberauth](https://hexdocs.pm/ueberauth). The signed-in
 player lives in the session cookie as a `NoCarrier.Players.Player`; there is no
 database. Every request gets a `current_scope` assign, `nil` when nobody is
@@ -58,6 +60,35 @@ on the default URL:
 ```sh
 cd backend && NOCARRIER_EMBEDDED_NATS=true go run ./cmd/nocarrierd
 ```
+
+## The telnet relay
+
+`NoCarrier.Telnet` is a [ThousandIsland](https://hexdocs.pm/thousand_island)
+listener that every node runs. It is on by default and stays in the
+supervision tree either way: with `TELNET=false` it starts as `:ignore`.
+`TELNET_PORT` picks the port, default 23, which needs root on most systems, so
+for local work put `TELNET_PORT=2323` in `frontend/.env` and
+`telnet localhost 2323`.
+
+Each connection is a `NoCarrier.Telnet.Session`. It shows the relay banner
+(`NoCarrier.Telnet.Banner`: block-letter NO CARRIER and the relay box in
+16-color ANSI, amber and cyan like the web theme, sent as UTF-8) with the
+universe seed and tick (from `query.universe.status`), asks for the
+dial-in code from the Settings page, and looks it up in `player-status`
+(`dial-in.<code>`, then the player ID it points at). A wrong code hangs up. A
+connected player sees the relay status (universe, tick, registered players,
+dialed-in players, this relay and how many are online) and has three commands:
+`?` for help, `/status` to refresh, `/quit` to hang up. Dropping the
+connection hangs up too. The
+server negotiates telnet echo and suppress-go-ahead and echoes input itself,
+so `telnet` and BBS terminals such as SyncTERM both behave; a raw client such
+as `nc` will show input twice.
+
+A player has one telnet session across the whole cluster. Each session
+registers `{:telnet, player_id}` in `NoCarrier.HordeRegistry`; when the same
+code dials in anywhere else, the earlier session is told
+`ANOTHER TERMINAL DIALED IN WITH YOUR CODE` and hung up, and the new one takes
+the registration.
 
 ## Running locally
 
@@ -98,12 +129,15 @@ node it rendered on and how many peers it sees.
 Clustering uses [libcluster](https://hexdocs.pm/libcluster) polling Fly's
 internal DNS (`<app>.internal`) and [Horde](https://hexdocs.pm/horde) for a
 cluster-wide registry (`NoCarrier.HordeRegistry`) and dynamic supervisor
-(`NoCarrier.HordeSupervisor`). Nothing is wired to Horde yet. Node names come
+(`NoCarrier.HordeSupervisor`). The telnet relay keeps its sessions in the
+registry; the dynamic supervisor is unused so far. Node names come
 from `rel/env.sh.eex`, which sets `RELEASE_NODE` to `<app>@<private IPv6>`
 whenever `FLY_APP_NAME` is present.
 
 `fly.toml` names the app `no-carrier`, keeps machines from auto-stopping (a
-cluster needs its nodes up), and expects two of them.
+cluster needs its nodes up), and expects two of them. It also exposes the
+telnet relay: the release runs as `nobody`, so the app listens on 2323 and
+Fly's proxy maps public port 23 to it.
 
 ```sh
 fly launch --no-deploy        # keep the existing fly.toml and Dockerfile

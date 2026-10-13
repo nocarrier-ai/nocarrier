@@ -93,4 +93,8 @@ if config_env() != :test do
   config :no_carrier, NoCarrier.Nats,
     url: System.get_env("NATS_URL") || "nats://127.0.0.1:4222",
     creds: System.get_env("NATS_CREDS")
+
+  config :no_carrier, NoCarrier.Telnet,
+    enabled: System.get_env("TELNET") != "false",
+    port: String.to_integer(System.get_env("TELNET_PORT", "23"))
 end

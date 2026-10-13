@@ -45,6 +45,20 @@ defmodule NoCarrier.PlayersTest do
             }} = Players.find_player(account_fixture())
   end
 
+  test "finds a player by dial-in code" do
+    register_player()
+
+    assert {:ok, %{player_id: "p-ada", display_name: "Ada"}} = Players.dial_in("7719-0402-5518")
+    assert Players.dial_in("0000-0000-0000") == :not_found
+  end
+
+  test "refuses a malformed dial-in code without asking the universe" do
+    Memory.fail_with(:unavailable)
+
+    assert Players.dial_in("771904025518") == :not_found
+    assert Players.dial_in("7719-0402-551") == :not_found
+  end
+
   test "reports an unreachable universe" do
     Memory.fail_with(:unavailable)
 

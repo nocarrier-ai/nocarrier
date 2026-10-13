@@ -34,6 +34,8 @@ type OAuthID struct {
 
 func (id OAuthID) Key() string { return "oauth." + id.Provider + "." + id.UID }
 
+func DialInKey(code string) string { return "dial-in." + code }
+
 type CreatePlayer struct {
 	PlayerID    string  `json:"player_id"`
 	OAuthID     OAuthID `json:"oauth_id"`
