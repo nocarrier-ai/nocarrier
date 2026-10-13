@@ -71,6 +71,7 @@ defmodule NoCarrier.MixProject do
       {:ueberauth, "~> 0.10.8"},
       {:ueberauth_github, "~> 0.8.3"},
       {:gnat, "~> 1.18"},
+      {:thousand_island, "~> 1.3"},
       {:bandit, "~> 1.5"}
     ]
   end

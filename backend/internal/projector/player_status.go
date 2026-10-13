@@ -20,7 +20,7 @@ type PlayerEntry struct {
 	CreatedTick int64          `json:"created_tick"`
 }
 
-type OAuthEntry struct {
+type IndexEntry struct {
 	PlayerID string `json:"player_id"`
 }
 
@@ -49,7 +49,7 @@ func (p *PlayerStatus) Player(ctx context.Context, playerID string) (PlayerEntry
 }
 
 func (p *PlayerStatus) PlayerIDByOAuthID(ctx context.Context, id player.OAuthID) (string, bool, error) {
-	var e OAuthEntry
+	var e IndexEntry
 	found, err := p.read(ctx, id.Key(), &e)
 	return e.PlayerID, found, err
 }
@@ -68,7 +68,10 @@ func (p *PlayerStatus) Apply(ctx context.Context, msg jetstream.Msg) error {
 	}); err != nil {
 		return err
 	}
-	return p.create(ctx, ev.OAuthID.Key(), OAuthEntry{PlayerID: ev.PlayerID})
+	if err := p.create(ctx, ev.OAuthID.Key(), IndexEntry{PlayerID: ev.PlayerID}); err != nil {
+		return err
+	}
+	return p.create(ctx, player.DialInKey(ev.DialInCode), IndexEntry{PlayerID: ev.PlayerID})
 }
 
 func (p *PlayerStatus) read(ctx context.Context, key string, v any) (bool, error) {
@@ -105,7 +108,7 @@ func decodePlayerCreated(data []byte) (player.PlayerCreated, bool) {
 		return player.PlayerCreated{}, false
 	}
 	var ev player.PlayerCreated
-	if json.Unmarshal(data, &ev) != nil || ev.PlayerID == "" || ev.OAuthID.Provider == "" || ev.OAuthID.UID == "" {
+	if json.Unmarshal(data, &ev) != nil || ev.PlayerID == "" || ev.OAuthID.Provider == "" || ev.OAuthID.UID == "" || ev.DialInCode == "" {
 		return player.PlayerCreated{}, false
 	}
 	return ev, true

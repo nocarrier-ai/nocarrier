@@ -7,6 +7,7 @@ kill_signal = "SIGTERM"
 [env]
   PHX_HOST = "no-carrier.fly.dev"
   PORT = "8080"
+  TELNET_PORT = "2323"
 
 [http_service]
   internal_port = 8080
@@ -20,6 +21,17 @@ kill_signal = "SIGTERM"
     type = "connections"
     hard_limit = 1000
     soft_limit = 1000
+
+[[services]]
+  protocol = "tcp"
+  internal_port = 2323
+  auto_stop_machines = "off"
+  auto_start_machines = true
+  min_machines_running = 2
+  processes = ["app"]
+
+  [[services.ports]]
+    port = 23
 
 [[vm]]
   memory = "1gb"

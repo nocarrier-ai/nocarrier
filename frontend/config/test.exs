@@ -26,3 +26,5 @@ config :ueberauth, Ueberauth.Strategy.Github.OAuth,
   client_secret: "github-client-secret"
 
 config :no_carrier, players_service: NoCarrier.Players.Service.Memory
+
+config :no_carrier, NoCarrier.Telnet, port: 0

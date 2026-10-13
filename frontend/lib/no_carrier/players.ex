@@ -7,6 +7,7 @@ defmodule NoCarrier.Players do
   @player_id_bytes 9
   @dial_in_code_digits 12
   @dial_in_code_group 4
+  @dial_in_code_format ~r/^\d{4}-\d{4}-\d{4}$/
 
   def account_from_auth(%Ueberauth.Auth{} = auth) do
     %Account{
@@ -46,6 +47,12 @@ defmodule NoCarrier.Players do
           {:error, reason}
       end
     end
+  end
+
+  def dial_in(code) when is_binary(code) do
+    if code =~ @dial_in_code_format,
+      do: service().lookup_player_by_dial_in_code(code),
+      else: :not_found
   end
 
   def validate_display_name(display_name) when is_binary(display_name) do

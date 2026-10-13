@@ -15,6 +15,7 @@ defmodule NoCarrier.Application do
       {Horde.DynamicSupervisor,
        name: NoCarrier.HordeSupervisor, strategy: :one_for_one, members: :auto},
       NoCarrier.Nats,
+      NoCarrier.Telnet,
       NoCarrierWeb.Endpoint
     ]
 

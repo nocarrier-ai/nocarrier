@@ -32,8 +32,7 @@ func (r *recorder) dispatched() []int64 {
 
 func bigBang(t *testing.T, js jetstream.JetStream) {
 	t.Helper()
-	u := UniverseCreated{Type: "UniverseCreated", TickPeriod: MinTickPeriod, Seed: 1}
-	if _, err := streams.Append(natstest.Context(t), js, streams.SubjectClock, u, 0); err != nil {
+	if _, err := CreateUniverse(natstest.Context(t), js, MinTickPeriod, 1); err != nil {
 		t.Fatalf("universe: %v", err)
 	}
 }

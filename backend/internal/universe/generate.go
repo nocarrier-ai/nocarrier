@@ -80,7 +80,7 @@ func seededColonies(n int) int { return max(2, n/200) }
 
 // Generate builds a universe of sectors for the given seed. Deterministic.
 // A bad result indicates a new seed is required.
-func Generate(seed int64, sectors int) (*BigBang, error) {
+func Generate(seed int64, sectors int) (*GenerationResult, error) {
 	if sectors < minSectors {
 		return nil, fmt.Errorf("universe needs at least %d sectors, got %d", minSectors, sectors)
 	}
@@ -111,7 +111,7 @@ func Generate(seed int64, sectors int) (*BigBang, error) {
 // Regenerate reproduces the big bang that built a stored map, for an instance
 // that has to finish creating its ports and planets. It fails if the generator
 // no longer produces that map.
-func Regenerate(stored *Universe) (*BigBang, error) {
+func Regenerate(stored *Universe) (*GenerationResult, error) {
 	bb, err := Generate(stored.Seed, stored.SectorCount())
 	if err != nil {
 		return nil, err
@@ -183,7 +183,7 @@ func newBuilder(seed int64, attempt, n int) *builder {
 	}
 }
 
-func generate(seed int64, attempt, n int) *BigBang {
+func generate(seed int64, attempt, n int) *GenerationResult {
 	b := newBuilder(seed, attempt, n)
 
 	b.buildCore()
@@ -603,7 +603,7 @@ func (b *builder) placePlanets() {
 
 // emit freezes the universe in canonical order. The kinds and classes are discarded
 // because they are only used as hints during generation.
-func (b *builder) emit(seed int64) *BigBang {
+func (b *builder) emit(seed int64) *GenerationResult {
 	u := &Universe{
 		Version: version,
 		Seed:    seed,
@@ -611,7 +611,7 @@ func (b *builder) emit(seed int64) *BigBang {
 		Sectors: make([]Sector, b.n),
 		Lanes:   make([]Lane, 0, len(b.lanes)),
 	}
-	bb := &BigBang{Map: u}
+	bb := &GenerationResult{Map: u}
 	for i := range b.n {
 		u.Sectors[i] = Sector{ID: i + 1, Core: b.kind[i] == sectorCore}
 		if b.hasPort[i] {

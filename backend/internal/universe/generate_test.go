@@ -12,15 +12,15 @@ import (
 func testUniverses(t *testing.T) []*Universe {
 	t.Helper()
 	var out []*Universe
-	for _, bb := range sharedBigBangs() {
+	for _, bb := range sharedGenerations() {
 		out = append(out, bb.Map)
 	}
 	return out
 }
 
-func testBigBangs(t *testing.T) []*BigBang {
+func testGenerations(t *testing.T) []*GenerationResult {
 	t.Helper()
-	return sharedBigBangs()
+	return sharedGenerations()
 }
 
 // generateMap is Generate for tests that only want the map.
@@ -33,7 +33,7 @@ func generateMap(t *testing.T, seed int64, sectors int) *Universe {
 	return bb.Map
 }
 
-var sharedBigBangs = sync.OnceValue(func() []*BigBang {
+var sharedGenerations = sync.OnceValue(func() []*GenerationResult {
 	cases := []struct {
 		sectors int
 		seeds   []int64
@@ -42,7 +42,7 @@ var sharedBigBangs = sync.OnceValue(func() []*BigBang {
 		{200, []int64{1, 2, 3}},
 		{1000, []int64{1, 42}},
 	}
-	var out []*BigBang
+	var out []*GenerationResult
 	for _, c := range cases {
 		for _, seed := range c.seeds {
 			bb, err := Generate(seed, c.sectors)
@@ -306,7 +306,7 @@ func TestCanonicalOrdering(t *testing.T) {
 			}
 		}
 	}
-	for _, bb := range testBigBangs(t) {
+	for _, bb := range testGenerations(t) {
 		for i := 1; i < len(bb.Ports); i++ {
 			if bb.Ports[i-1].Sector >= bb.Ports[i].Sector {
 				t.Fatalf("%s: ports out of order at %d", name(bb.Map), i)
@@ -317,7 +317,7 @@ func TestCanonicalOrdering(t *testing.T) {
 
 // The port share lands near portPercent.
 func TestPortsRoughlyHitTarget(t *testing.T) {
-	for _, bb := range testBigBangs(t) {
+	for _, bb := range testGenerations(t) {
 		got := len(bb.Ports) * 100 / len(bb.Map.Sectors)
 		want := portPercent
 		if got < want-15 || got > want+20 {
@@ -351,7 +351,7 @@ func TestAccessorsOutOfRange(t *testing.T) {
 
 // Every port trades all three commodities with capacity in range and regen set.
 func TestPortsTradeAllThreeCommodities(t *testing.T) {
-	for _, bb := range testBigBangs(t) {
+	for _, bb := range testGenerations(t) {
 		for _, p := range bb.Ports {
 			for c, g := range p.Commodities {
 				if g.Capacity < capacityMin || g.Capacity > capacityMax {
@@ -437,7 +437,7 @@ func TestPlantShortcutsAddsLanes(t *testing.T) {
 // Terra is the spawn's only planet and the only one in the core; it holds the
 // colonist source.
 func TestTerraAtSpawn(t *testing.T) {
-	for _, bb := range testBigBangs(t) {
+	for _, bb := range testGenerations(t) {
 		u := bb.Map
 		var atSpawn []Planet
 		for _, p := range bb.Planets {
@@ -532,7 +532,7 @@ func TestPlanetsFavourDepthAndPockets(t *testing.T) {
 
 // A few planets start with a small colony; the rest are empty.
 func TestSeededColoniesAreFew(t *testing.T) {
-	for _, bb := range testBigBangs(t) {
+	for _, bb := range testGenerations(t) {
 		u := bb.Map
 		seeded := 0
 		for _, p := range bb.Planets {

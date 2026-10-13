@@ -33,7 +33,7 @@ func (u *Universe) validate() error {
 
 // validate checks the roster against the map. Run only by Generate: once
 // created, each port and planet is validated by its own aggregate.
-func (bb *BigBang) validate() error {
+func (bb *GenerationResult) validate() error {
 	if err := bb.checkPorts(); err != nil {
 		return err
 	}
@@ -41,7 +41,7 @@ func (bb *BigBang) validate() error {
 }
 
 // wellShaped checks generation quality. Run only by Generate.
-func (bb *BigBang) wellShaped() error {
+func (bb *GenerationResult) wellShaped() error {
 	if err := bb.Map.checkHubsEmerged(); err != nil {
 		return err
 	}
@@ -166,7 +166,7 @@ func (u *Universe) checkSpurs() error {
 
 // checkPorts: one port per sector, in order, every commodity on real terms,
 // and the spawn has one.
-func (bb *BigBang) checkPorts() error {
+func (bb *GenerationResult) checkPorts() error {
 	for i, p := range bb.Ports {
 		if _, ok := bb.Map.Sector(p.Sector); !ok {
 			return fmt.Errorf("%w: port in unknown sector %d", errInvalid, p.Sector)
@@ -189,7 +189,7 @@ func (bb *BigBang) checkPorts() error {
 
 // checkPlanets: references resolve, the per-sector cap holds, classes are
 // known, and the spawn has a planet for colonists to come from.
-func (bb *BigBang) checkPlanets() error {
+func (bb *GenerationResult) checkPlanets() error {
 	per := make(map[int]int, len(bb.Planets))
 	for _, p := range bb.Planets {
 		if _, ok := bb.Map.Sector(p.Sector); !ok {
@@ -214,7 +214,7 @@ func (bb *BigBang) checkPlanets() error {
 
 // checkShortcutsExist: enough seller-to-buyer routes are shorter over all
 // lanes than over public ones.
-func (bb *BigBang) checkShortcutsExist() error {
+func (bb *GenerationResult) checkShortcutsExist() error {
 	all := bb.Map.adjacency()
 	public := bb.Map.publicAdjacency()
 	target := shortcutCount(len(bb.Map.Sectors))

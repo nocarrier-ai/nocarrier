@@ -40,6 +40,7 @@ func TestDecodePlayerCreatedSkips(t *testing.T) {
 		"missing player ID": `{"type":"PlayerCreated","oauth_id":{"provider":"github","uid":"42"}}`,
 		"missing oauth ID":  `{"type":"PlayerCreated","player_id":"p1"}`,
 		"missing uid":       `{"type":"PlayerCreated","player_id":"p1","oauth_id":{"provider":"github"}}`,
+		"missing dial-in":   `{"type":"PlayerCreated","player_id":"p1","oauth_id":{"provider":"github","uid":"42"}}`,
 		"bad json":          `{`,
 	} {
 		t.Run(name, func(t *testing.T) {
@@ -103,6 +104,11 @@ func TestPlayerStatusProjection(t *testing.T) {
 	if _, found, err := proj.Player(ctx, "nobody"); err != nil || found {
 		t.Errorf("unknown player found = %v, err = %v", found, err)
 	}
+
+	var byCode IndexEntry
+	if found, err := proj.read(ctx, player.DialInKey("7719-0402-5518"), &byCode); err != nil || !found || byCode.PlayerID != "p1" {
+		t.Errorf("by dial-in code = %+v, %v, %v; want p1", byCode, found, err)
+	}
 }
 
 func TestPlayerStatusIgnoresOtherEvents(t *testing.T) {
@@ -131,6 +137,10 @@ func TestPlayerStatusIndexKeepsTheFirstPlayer(t *testing.T) {
 	playerID, found, err := proj.PlayerIDByOAuthID(ctx, player.OAuthID{Provider: "github", UID: "42"})
 	if err != nil || !found || playerID != "p1" {
 		t.Errorf("by oauth = %q, %v, %v; want the first player p1", playerID, found, err)
+	}
+	var byCode IndexEntry
+	if found, err := proj.read(ctx, player.DialInKey("7719-0402-5518"), &byCode); err != nil || !found || byCode.PlayerID != "p1" {
+		t.Errorf("by dial-in code = %+v, %v, %v; want the first player p1", byCode, found, err)
 	}
 }
 

@@ -69,6 +69,20 @@ func CheckName(what, name string, limit int) error {
 	return nil
 }
 
+// SubjectCount counts the aggregates of one kind: the subjects on EVENTS that
+// match the filter.
+func SubjectCount(ctx context.Context, js jetstream.JetStream, filter string) (int, error) {
+	s, err := js.Stream(ctx, StreamEvents)
+	if err != nil {
+		return 0, err
+	}
+	info, err := s.Info(ctx, jetstream.WithSubjectFilter(filter))
+	if err != nil {
+		return 0, fmt.Errorf("count %s: %w", filter, err)
+	}
+	return len(info.State.Subjects), nil
+}
+
 // Number parses an id that is a number, as sector and planet ids are. Only the
 // canonical spelling is accepted, so one thing cannot have two subjects.
 func Number(id string) (int, bool) {
