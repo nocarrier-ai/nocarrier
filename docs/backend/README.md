@@ -394,8 +394,10 @@ Loops restart with backoff. Repeated failure
 exits the process nonzero for the platform to replace. 
 
 Startup: connect
-NATS, idempotently ensure streams/buckets, append UniverseCreated via
-guarded first append if CLOCK is empty, replay CLOCK to head, then start
+NATS, then the big bang (`internal/bigbang`): idempotently ensure
+streams/buckets, elect the map with a KV create, create every port and planet
+from the roster, append UniverseCreated via guarded first append if CLOCK is
+empty. An instance that finds all of that done just loads it. Then start
 loops. 
 
 Local dev runs one process with an embedded NATS server. Production
@@ -409,7 +411,8 @@ commands redeliver, projections resume from durable cursors.
 Monorepo github.com/nocarrier-ai/nocarrier:
 
 - `backend/` -  Go module (this design); cmd/nocarrierd + internal/{loop,
-             streams, clock, dispatch, sector, decide, projector, service,
+             streams, clock, bigbang, universe, dispatch, sector, port,
+             planet, avatar, player, doctrine, decide, projector, service,
              devnats, natstest (test-only)}
 - `web/`       Phoenix app (LiveView + telnet), NATS via Gnat, per-node feed
              subscription manager rebroadcasting via local PubSub

@@ -1,7 +1,6 @@
-package main
+package bigbang
 
 import (
-	"io"
 	"sync"
 	"testing"
 	"time"
@@ -16,8 +15,14 @@ import (
 	"github.com/nocarrier-ai/nocarrier/internal/universe"
 )
 
-func testConfig(period time.Duration) config {
-	return config{replicas: 1, tickPeriod: period, sectors: 64}
+type quiet struct{}
+
+func (quiet) BigBangStarting(int) {}
+func (quiet) BigBangLost()        {}
+func (quiet) BigBangResuming()    {}
+
+func testOptions(period time.Duration) Options {
+	return Options{Replicas: 1, TickPeriod: period, Sectors: 64}
 }
 
 func clockEvents(t *testing.T, js jetstream.JetStream) uint64 {
@@ -25,23 +30,23 @@ func clockEvents(t *testing.T, js jetstream.JetStream) uint64 {
 	return natstest.SubjectCounts(t, js, streams.StreamClock, streams.SubjectClock)[streams.SubjectClock]
 }
 
-func TestEnsureUniverseCreatesOnce(t *testing.T) {
+func TestEnsureCreatesOnce(t *testing.T) {
 	js := natstest.Start(t)
 	ctx := natstest.Context(t)
 
-	first, _, err := ensureUniverse(ctx, js, testConfig(time.Minute), newReporter(io.Discard, false))
+	first, err := Ensure(ctx, js, testOptions(time.Minute), quiet{})
 	if err != nil {
 		t.Fatalf("first: %v", err)
 	}
-	if first.Type != "UniverseCreated" || first.TickPeriod != time.Minute {
-		t.Errorf("created %+v", first)
+	if first.Created.Type != "UniverseCreated" || first.Created.TickPeriod != time.Minute || !first.Rolled {
+		t.Errorf("first %+v", first)
 	}
 
-	second, _, err := ensureUniverse(ctx, js, testConfig(2*time.Minute), newReporter(io.Discard, false))
+	second, err := Ensure(ctx, js, testOptions(2*time.Minute), quiet{})
 	if err != nil {
 		t.Fatalf("second: %v", err)
 	}
-	if second != first {
+	if second.Created != first.Created || !second.Map.Equal(first.Map) || second.Rolled {
 		t.Errorf("second call returned %+v, want the original %+v", second, first)
 	}
 	if n := clockEvents(t, js); n != 1 {
@@ -49,57 +54,64 @@ func TestEnsureUniverseCreatesOnce(t *testing.T) {
 	}
 }
 
-func TestEnsureUniverseConcurrentInstancesAgree(t *testing.T) {
+func TestEnsureConcurrentInstancesAgree(t *testing.T) {
 	js := natstest.Start(t)
 	ctx := natstest.Context(t)
 
 	const instances = 8
-	got := make([]clock.UniverseCreated, instances)
+	got := make([]Result, instances)
 	errs := make([]error, instances)
 	var wg sync.WaitGroup
 	for i := range instances {
 		wg.Go(func() {
-			got[i], _, errs[i] = ensureUniverse(ctx, js, testConfig(time.Minute), newReporter(io.Discard, false))
+			got[i], errs[i] = Ensure(ctx, js, testOptions(time.Minute), quiet{})
 		})
 	}
 	wg.Wait()
 
+	rolled := 0
 	for i := range instances {
 		if errs[i] != nil {
 			t.Fatalf("instance %d: %v", i, errs[i])
 		}
-		if got[i] != got[0] {
-			t.Errorf("instance %d saw %+v, instance 0 saw %+v", i, got[i], got[0])
+		if got[i].Created != got[0].Created || !got[i].Map.Equal(got[0].Map) {
+			t.Errorf("instance %d saw %+v, instance 0 saw %+v", i, got[i].Created, got[0].Created)
 		}
+		if got[i].Rolled {
+			rolled++
+		}
+	}
+	if rolled != 1 {
+		t.Errorf("%d instances rolled the map, want 1", rolled)
 	}
 	if n := clockEvents(t, js); n != 1 {
 		t.Errorf("clock events %d, want 1", n)
 	}
 }
 
-func TestEnsureUniverseRejectsForeignFirstEvent(t *testing.T) {
+func TestEnsureRejectsForeignFirstEvent(t *testing.T) {
 	js := natstest.Start(t)
 	ctx := natstest.Context(t)
 	if _, err := streams.Append(ctx, js, streams.SubjectClock, clock.TickAdvanced{Type: "TickAdvanced"}, 0); err != nil {
 		t.Fatalf("seed clock: %v", err)
 	}
 
-	if _, _, err := ensureUniverse(ctx, js, testConfig(time.Minute), newReporter(io.Discard, false)); err == nil {
+	if _, err := Ensure(ctx, js, testOptions(time.Minute), quiet{}); err == nil {
 		t.Fatal("accepted a clock whose first event is not UniverseCreated")
 	}
 }
 
 // The big bang creates every port and planet in the roster as the first event
 // on its own subject, before UniverseCreated.
-func TestEnsureUniverseCreatesPortsAndPlanets(t *testing.T) {
+func TestEnsureCreatesPortsAndPlanets(t *testing.T) {
 	js := natstest.Start(t)
 	ctx := natstest.Context(t)
 
-	_, u, err := ensureUniverse(ctx, js, testConfig(time.Minute), newReporter(io.Discard, false))
+	bang, err := Ensure(ctx, js, testOptions(time.Minute), quiet{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	bb, err := universe.Regenerate(u)
+	bb, err := universe.Regenerate(bang.Map)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -133,12 +145,9 @@ func TestEnsureUniverseCreatesPortsAndPlanets(t *testing.T) {
 
 // A map with no UniverseCreated is a big bang that did not finish. The next
 // instance rolls the roster again from the stored seed and completes it.
-func TestEnsureUniverseCompletesAnInterruptedBigBang(t *testing.T) {
+func TestEnsureCompletesAnInterruptedBigBang(t *testing.T) {
 	js := natstest.Start(t)
 	ctx := natstest.Context(t)
-	if err := streams.Ensure(ctx, js, 1, time.Minute); err != nil {
-		t.Fatal(err)
-	}
 	store, err := universe.NewStore(ctx, js)
 	if err != nil {
 		t.Fatal(err)
@@ -155,12 +164,12 @@ func TestEnsureUniverseCompletesAnInterruptedBigBang(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	created, u, err := ensureUniverse(ctx, js, testConfig(time.Minute), newReporter(io.Discard, false))
+	bang, err := Ensure(ctx, js, testOptions(time.Minute), quiet{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if created.Seed != 3 || !u.Equal(bb.Map) {
-		t.Errorf("completed a different universe: seed %d", created.Seed)
+	if bang.Created.Seed != 3 || !bang.Map.Equal(bb.Map) || bang.Rolled {
+		t.Errorf("completed a different universe: %+v", bang)
 	}
 	ports := natstest.SubjectCounts(t, js, streams.StreamEvents, streams.PortEvents)
 	planets := natstest.SubjectCounts(t, js, streams.StreamEvents, streams.PlanetEvents)

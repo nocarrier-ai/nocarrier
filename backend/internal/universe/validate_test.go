@@ -7,7 +7,7 @@ import (
 )
 
 // mutate copies a good big bang, applies a change, and re-indexes the map.
-func mutate(t *testing.T, change func(*BigBang)) *BigBang {
+func mutate(t *testing.T, change func(*GenerationResult)) *GenerationResult {
 	t.Helper()
 	src, err := Generate(5, 64)
 	if err != nil {
@@ -19,7 +19,7 @@ func mutate(t *testing.T, change func(*BigBang)) *BigBang {
 		Lanes:           slices.Clone(src.Map.Lanes),
 		PublicAtBigBang: slices.Clone(src.Map.PublicAtBigBang),
 	}
-	bb := &BigBang{Map: u, Ports: slices.Clone(src.Ports), Planets: slices.Clone(src.Planets)}
+	bb := &GenerationResult{Map: u, Ports: slices.Clone(src.Ports), Planets: slices.Clone(src.Planets)}
 	change(bb)
 	u.index()
 	return bb
@@ -27,7 +27,7 @@ func mutate(t *testing.T, change func(*BigBang)) *BigBang {
 
 // A generated universe passes both validations.
 func TestValidateAcceptsAGeneratedUniverse(t *testing.T) {
-	bb := mutate(t, func(*BigBang) {})
+	bb := mutate(t, func(*GenerationResult) {})
 	if err := bb.Map.validate(); err != nil {
 		t.Fatalf("a freshly generated map failed validation: %v", err)
 	}
@@ -68,7 +68,7 @@ func TestValidateRejects(t *testing.T) {
 	}
 	for label, change := range cases {
 		t.Run(label, func(t *testing.T) {
-			bb := mutate(t, func(bb *BigBang) { change(bb.Map) })
+			bb := mutate(t, func(bb *GenerationResult) { change(bb.Map) })
 			err := bb.Map.validate()
 			if err == nil {
 				t.Fatal("validation passed")
@@ -83,31 +83,31 @@ func TestValidateRejects(t *testing.T) {
 
 // Each fault in the roster is caught at generation and reported as errInvalid.
 func TestBigBangValidateRejects(t *testing.T) {
-	cases := map[string]func(*BigBang){
-		"port in a sector that does not exist": func(bb *BigBang) {
+	cases := map[string]func(*GenerationResult){
+		"port in a sector that does not exist": func(bb *GenerationResult) {
 			bb.Ports = append(bb.Ports, Port{Sector: 100000})
 		},
-		"two ports in one sector": func(bb *BigBang) {
+		"two ports in one sector": func(bb *GenerationResult) {
 			bb.Ports = append(bb.Ports, Port{Sector: bb.Ports[0].Sector})
 		},
-		"ports out of order": func(bb *BigBang) {
+		"ports out of order": func(bb *GenerationResult) {
 			bb.Ports[0], bb.Ports[1] = bb.Ports[1], bb.Ports[0]
 		},
-		"no ports at all":         func(bb *BigBang) { bb.Ports = nil },
-		"no port at the spawn":    func(bb *BigBang) { bb.Ports = bb.Ports[1:] },
-		"port with zero capacity": func(bb *BigBang) { bb.Ports[0].Commodities[FuelOre].Capacity = 0 },
-		"port with zero regen":    func(bb *BigBang) { bb.Ports[0].Commodities[Organics].Regen = 0 },
-		"planet in a sector that does not exist": func(bb *BigBang) {
+		"no ports at all":         func(bb *GenerationResult) { bb.Ports = nil },
+		"no port at the spawn":    func(bb *GenerationResult) { bb.Ports = bb.Ports[1:] },
+		"port with zero capacity": func(bb *GenerationResult) { bb.Ports[0].Commodities[FuelOre].Capacity = 0 },
+		"port with zero regen":    func(bb *GenerationResult) { bb.Ports[0].Commodities[Organics].Regen = 0 },
+		"planet in a sector that does not exist": func(bb *GenerationResult) {
 			bb.Planets = append(bb.Planets, Planet{Sector: 100000})
 		},
-		"planet with unknown class":      func(bb *BigBang) { bb.Planets[0].Class = PlanetClass(len(PlanetClasses)) },
-		"planet with negative colonists": func(bb *BigBang) { bb.Planets[0].InitialColonists = -1 },
-		"too many planets in one sector": func(bb *BigBang) {
+		"planet with unknown class":      func(bb *GenerationResult) { bb.Planets[0].Class = PlanetClass(len(PlanetClasses)) },
+		"planet with negative colonists": func(bb *GenerationResult) { bb.Planets[0].InitialColonists = -1 },
+		"too many planets in one sector": func(bb *GenerationResult) {
 			for range maxPlanetsPerSector + 1 {
 				bb.Planets = append(bb.Planets, Planet{Sector: 30})
 			}
 		},
-		"no planet at the spawn": func(bb *BigBang) {
+		"no planet at the spawn": func(bb *GenerationResult) {
 			bb.Planets = slices.DeleteFunc(bb.Planets, func(p Planet) bool { return p.Sector == bb.Map.Spawn })
 		},
 	}
@@ -128,7 +128,7 @@ func TestBigBangValidateRejects(t *testing.T) {
 
 // A one-neighbour sector whose only lane is one-way is rejected.
 func TestValidateRejectsOneWaySpur(t *testing.T) {
-	bb := mutate(t, func(bb *BigBang) {
+	bb := mutate(t, func(bb *GenerationResult) {
 		u := bb.Map
 		for _, s := range u.Sectors {
 			if len(u.neighbours(s.ID)) != 1 {

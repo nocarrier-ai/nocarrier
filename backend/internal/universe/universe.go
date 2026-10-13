@@ -123,10 +123,11 @@ type Universe struct {
 	exits [][]int // indices into Lanes, by sector
 }
 
-// BigBang is what Generate produces: the map, stored once, and the ports and
-// planets to create, each becoming the first event on its own subject. Ports
-// and Planets are sorted by sector; a planet's ID is its position here, from 1.
-type BigBang struct {
+// GenerationResult is what Generate produces: the map, stored once, and the
+// ports and planets to create, each becoming the first event on its own
+// subject. Ports and Planets are sorted by sector; a planet's ID is its
+// position here, from 1.
+type GenerationResult struct {
 	Map     *Universe
 	Ports   []Port
 	Planets []Planet

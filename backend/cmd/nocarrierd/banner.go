@@ -5,8 +5,9 @@ import (
 	"io"
 	"os"
 	"strings"
-	"time"
 
+	"github.com/nocarrier-ai/nocarrier/internal/bigbang"
+	"github.com/nocarrier-ai/nocarrier/internal/service"
 	"github.com/nocarrier-ai/nocarrier/internal/universe"
 )
 
@@ -58,29 +59,31 @@ func (r reporter) line(name string, parts ...string) {
 	fmt.Fprintf(r.out, "  %s %s %s\n", r.label(fmt.Sprintf("%-8s", name)), r.sep(":"), strings.Join(parts, r.sep("  ")))
 }
 
-func (r reporter) bigBangStarting(sectors int) {
+func (r reporter) BigBangStarting(sectors int) {
 	r.header("BIG BANG")
 	r.line("Status", r.label("no universe found, generating"), r.kv("sectors", sectors))
 }
 
-func (r reporter) bigBangLost() {
+func (r reporter) BigBangLost() {
 	r.line("Status", r.label("another instance won the big bang; loading its universe"))
 }
 
-func (r reporter) bigBangResuming() {
+func (r reporter) BigBangResuming() {
 	r.line("Status", r.paint(ansiEvent, "completing the big bang: map exists, clock event does not; rolling its ports and planets again from the stored seed"))
 }
 
-func (r reporter) universe(u *universe.Universe, tick time.Duration, bigBang bool, ports, planets int) {
+func (r reporter) universe(bang bigbang.Result, status service.UniverseStatus) {
+	u := bang.Map
 	core, oneWay := universeCounts(u)
-	if !bigBang {
+	if !bang.Rolled {
 		r.header("universe loaded")
 	}
-	r.line("Universe", r.kv("seed", u.Seed), r.kv("map v", u.Version), r.kv("tick", tick))
+	r.line("Universe", r.kv("seed", u.Seed), r.kv("map v", u.Version), r.kv("tick", bang.Created.TickPeriod))
 	r.line("Sectors", r.value(u.SectorCount()), r.kv("core", core), r.kv("spawn", u.Spawn))
 	r.line("Lanes", r.value(len(u.Lanes)), r.kv("one-way", oneWay), r.kv("public", len(u.PublicAtBigBang)))
-	r.line("Ports", r.value(ports))
-	r.line("Planets", r.value(planets))
+	r.line("Ports", r.value(status.Ports))
+	r.line("Planets", r.value(status.Planets))
+	r.line("Players", r.value(status.Players))
 }
 
 func universeCounts(u *universe.Universe) (core, oneWay int) {

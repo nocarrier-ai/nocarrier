@@ -125,7 +125,7 @@ func TestStoreCreateRacesSafely(t *testing.T) {
 func TestStoreLoadRejectsAnInvalidMap(t *testing.T) {
 	s, js := startStore(t)
 	ctx := natstest.Context(t)
-	broken := mutate(t, func(bb *BigBang) {
+	broken := mutate(t, func(bb *GenerationResult) {
 		bb.Map.Lanes = slices.DeleteFunc(bb.Map.Lanes, func(l Lane) bool { return l.From == 40 })
 	}).Map
 	data, err := encode(broken)
@@ -185,7 +185,7 @@ func TestStoreLoadAcceptsASoundButPoorlyShapedMap(t *testing.T) {
 	if err := u.validate(); err != nil {
 		t.Fatalf("chain should be structurally sound: %v", err)
 	}
-	if err := (&BigBang{Map: u}).wellShaped(); err == nil {
+	if err := (&GenerationResult{Map: u}).wellShaped(); err == nil {
 		t.Fatal("chain should fail the quality gate; the test proves nothing otherwise")
 	}
 
@@ -205,7 +205,7 @@ func TestStoreLoadAcceptsASoundButPoorlyShapedMap(t *testing.T) {
 
 // Everything Generate returns passes wellShaped.
 func TestGenerateRequiresGoodShape(t *testing.T) {
-	for _, bb := range testBigBangs(t) {
+	for _, bb := range testGenerations(t) {
 		if err := bb.wellShaped(); err != nil {
 			t.Errorf("%s: %v", name(bb.Map), err)
 		}
