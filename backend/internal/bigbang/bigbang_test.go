@@ -22,7 +22,7 @@ func (quiet) BigBangLost()        {}
 func (quiet) BigBangResuming()    {}
 
 func testOptions(period time.Duration) Options {
-	return Options{Replicas: 1, TickPeriod: period, Sectors: 64}
+	return Options{TickPeriod: period, Sectors: 64}
 }
 
 func clockEvents(t *testing.T, js jetstream.JetStream) uint64 {
@@ -38,7 +38,7 @@ func TestEnsureCreatesOnce(t *testing.T) {
 	if err != nil {
 		t.Fatalf("first: %v", err)
 	}
-	if first.Created.Type != "UniverseCreated" || first.Created.TickPeriod != time.Minute || !first.Rolled {
+	if first.Created.Type != clock.UniverseCreatedType || first.Created.TickPeriod != time.Minute || first.Created.Sectors != 64 || !first.Rolled {
 		t.Errorf("first %+v", first)
 	}
 
@@ -92,7 +92,7 @@ func TestEnsureConcurrentInstancesAgree(t *testing.T) {
 func TestEnsureRejectsForeignFirstEvent(t *testing.T) {
 	js := natstest.Start(t)
 	ctx := natstest.Context(t)
-	if _, err := streams.Append(ctx, js, streams.SubjectClock, clock.TickAdvanced{Type: "TickAdvanced"}, 0); err != nil {
+	if _, err := streams.Append(ctx, js, streams.SubjectClock, clock.TickAdvanced{Type: clock.TickAdvancedType}, 0); err != nil {
 		t.Fatalf("seed clock: %v", err)
 	}
 
@@ -119,6 +119,9 @@ func TestEnsureCreatesPortsAndPlanets(t *testing.T) {
 	planets := natstest.SubjectCounts(t, js, streams.StreamEvents, streams.PlanetEvents)
 	if len(ports) != len(bb.Ports) || len(planets) != len(bb.Planets) {
 		t.Errorf("%d ports and %d planets created, roster has %d and %d", len(ports), len(planets), len(bb.Ports), len(bb.Planets))
+	}
+	if bang.Ports != len(bb.Ports) || bang.Planets != len(bb.Planets) {
+		t.Errorf("result counts %d ports and %d planets, roster has %d and %d", bang.Ports, bang.Planets, len(bb.Ports), len(bb.Planets))
 	}
 
 	var spawnPort port.PortCreated

@@ -14,15 +14,15 @@ func TestCreateUniverseOnce(t *testing.T) {
 	if _, found, err := ReadUniverseCreated(ctx, js); err != nil || found {
 		t.Fatalf("before the big bang: found %v, err %v", found, err)
 	}
-	first, err := CreateUniverse(ctx, js, MinTickPeriod, 7)
+	first, err := CreateUniverse(ctx, js, MinTickPeriod, 7, 64)
 	if err != nil {
 		t.Fatalf("first: %v", err)
 	}
-	if first.Type != "UniverseCreated" || first.TickPeriod != MinTickPeriod || first.Seed != 7 {
+	if first.Type != UniverseCreatedType || first.TickPeriod != MinTickPeriod || first.Seed != 7 || first.Sectors != 64 {
 		t.Errorf("created %+v", first)
 	}
 
-	second, err := CreateUniverse(ctx, js, 2*MinTickPeriod, 8)
+	second, err := CreateUniverse(ctx, js, 2*MinTickPeriod, 8, 65)
 	if err != nil {
 		t.Fatalf("second: %v", err)
 	}
@@ -41,14 +41,14 @@ func TestCreateUniverseOnce(t *testing.T) {
 func TestUniverseCreatedMustBeTheFirstClockEvent(t *testing.T) {
 	js := natstest.Start(t)
 	ctx := natstest.Context(t)
-	if _, err := streams.Append(ctx, js, streams.SubjectClock, TickAdvanced{Type: "TickAdvanced"}, 0); err != nil {
+	if _, err := streams.Append(ctx, js, streams.SubjectClock, TickAdvanced{Type: TickAdvancedType}, 0); err != nil {
 		t.Fatalf("seed clock: %v", err)
 	}
 
 	if _, _, err := ReadUniverseCreated(ctx, js); err == nil {
 		t.Error("read accepted a clock whose first event is not UniverseCreated")
 	}
-	if _, err := CreateUniverse(ctx, js, MinTickPeriod, 1); err == nil {
+	if _, err := CreateUniverse(ctx, js, MinTickPeriod, 1, 64); err == nil {
 		t.Error("create accepted a clock whose first event is not UniverseCreated")
 	}
 }

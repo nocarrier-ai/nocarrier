@@ -16,14 +16,20 @@ import (
 // This needs the type field on the wire so it can be used as a discriminant
 // by non-Go consumers
 
+const (
+	UniverseCreatedType = "UniverseCreated"
+	TickAdvancedType    = "TickAdvanced"
+)
+
 type UniverseCreated struct {
-	Type       string        `json:"type"` // UniverseCreated
+	Type       string        `json:"type"`
 	TickPeriod time.Duration `json:"tick_period"`
 	Seed       int64         `json:"seed"`
+	Sectors    int           `json:"sectors"`
 }
 
 type TickAdvanced struct {
-	Type             string `json:"type"` // TickAdvanced
+	Type             string `json:"type"`
 	Tick             int64  `json:"tick"`
 	WinnerInstanceID string `json:"winner_instance_id"`
 }
@@ -152,7 +158,7 @@ func (p *Pacer) jitter() time.Duration {
 // and dispatches if this instance won.
 func (p *Pacer) attempt(ctx context.Context) error {
 	next := p.lastTick + 1
-	ev := TickAdvanced{Type: "TickAdvanced", Tick: next, WinnerInstanceID: p.instanceID}
+	ev := TickAdvanced{Type: TickAdvancedType, Tick: next, WinnerInstanceID: p.instanceID}
 
 	seq, err := streams.Append(ctx, p.js, streams.SubjectClock, ev, p.lastSeq)
 	switch {
@@ -199,8 +205,8 @@ func CurrentTick(ctx context.Context, js jetstream.JetStream) (int64, error) {
 	if seq == 0 {
 		return 0, ErrNoClock
 	}
-	if ev.Type != "TickAdvanced" {
-		return -1, nil
+	if ev.Type != TickAdvancedType {
+		return 0, nil
 	}
 	return ev.Tick, nil
 }
@@ -214,7 +220,7 @@ func (p *Pacer) readHead(ctx context.Context) (observed, error) {
 	if seq == 0 {
 		return observed{}, ErrNoClock
 	}
-	if ev.Type != "TickAdvanced" {
+	if ev.Type != TickAdvancedType {
 		// Head is UniverseCreated: tick 0 hasn't happened yet.
 		return observed{tick: -1, seq: seq}, nil
 	}

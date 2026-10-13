@@ -31,7 +31,6 @@ const (
 	avatarCommissionSubject = "cmd.avatar.commission"
 	portTradeSubject        = "cmd.port.trade"
 	playerCreateSubject     = "cmd.player.create"
-	universeStatusSubject   = "query.universe.status"
 )
 
 type fakeUpdater struct {
@@ -118,19 +117,10 @@ func (f *fakeCreator) received() []player.CreatePlayer {
 	return append([]player.CreatePlayer(nil), f.calls...)
 }
 
-type fakeReporter struct {
-	status service.UniverseStatus
-	err    error
-}
-
-func (f *fakeReporter) Status(context.Context) (service.UniverseStatus, error) {
-	return f.status, f.err
-}
-
 func startServices(t *testing.T, d service.DoctrineUpdater, a service.AdmiralCommissioner, p service.PortTrader, pl service.PlayerCreator) (jetstream.JetStream, *nats.Conn) {
 	t.Helper()
 	js := natstest.Start(t)
-	natstest.Run(t, service.New(js.Conn(), natstest.Logger(), d, a, p, pl, &fakeReporter{}))
+	natstest.Run(t, service.New(js.Conn(), natstest.Logger(), d, a, p, pl))
 	return js, js.Conn()
 }
 
@@ -279,7 +269,7 @@ func TestDoctrineUpdateThroughHandler(t *testing.T) {
 	if _, err := streams.Append(ctx, js, streams.SubjectClock, clock.UniverseCreated{Type: "UniverseCreated"}, 0); err != nil {
 		t.Fatalf("universe: %v", err)
 	}
-	natstest.Run(t, service.New(js.Conn(), natstest.Logger(), doctrine.NewHandler(js), avatar.NewHandler(js), &fakeTrader{}, &fakeCreator{}, &fakeReporter{}))
+	natstest.Run(t, service.New(js.Conn(), natstest.Logger(), doctrine.NewHandler(js), avatar.NewHandler(js), &fakeTrader{}, &fakeCreator{}))
 
 	msg := requestJSON(t, js.Conn(), update("a1", "trade first"))
 	var reply service.DoctrineUpdateReply
@@ -291,7 +281,7 @@ func TestDoctrineUpdateThroughHandler(t *testing.T) {
 	if !natstest.Last(t, js, streams.StreamEvents, streams.DoctrineSubject("a1"), &stored) {
 		t.Fatal("no event appended")
 	}
-	if reply.Revision != 1 || reply.Tick != -1 || reply.Hash != stored.Hash || stored.Revision != 1 {
+	if reply.Revision != 1 || reply.Tick != 0 || reply.Hash != stored.Hash || stored.Revision != 1 {
 		t.Errorf("reply %+v, stored %+v", reply, stored)
 	}
 
@@ -396,7 +386,7 @@ func TestAvatarCommissionThroughHandler(t *testing.T) {
 	if _, err := streams.Append(ctx, js, streams.SubjectClock, clock.UniverseCreated{Type: "UniverseCreated"}, 0); err != nil {
 		t.Fatalf("universe: %v", err)
 	}
-	natstest.Run(t, service.New(js.Conn(), natstest.Logger(), doctrine.NewHandler(js), avatar.NewHandler(js), &fakeTrader{}, &fakeCreator{}, &fakeReporter{}))
+	natstest.Run(t, service.New(js.Conn(), natstest.Logger(), doctrine.NewHandler(js), avatar.NewHandler(js), &fakeTrader{}, &fakeCreator{}))
 
 	msg := commissionJSON(t, js.Conn(), commission("a1", "Akbar", "USS Cheesewheel"))
 	var reply service.AvatarCommissionReply
@@ -536,7 +526,7 @@ func TestPortTradeThroughHandler(t *testing.T) {
 	}}); err != nil {
 		t.Fatalf("create port: %v", err)
 	}
-	natstest.Run(t, service.New(js.Conn(), natstest.Logger(), doctrine.NewHandler(js), avatar.NewHandler(js), ports, &fakeCreator{}, &fakeReporter{}))
+	natstest.Run(t, service.New(js.Conn(), natstest.Logger(), doctrine.NewHandler(js), avatar.NewHandler(js), ports, &fakeCreator{}))
 
 	msg := tradeJSON(t, js.Conn(), trade("1", "s1", universe.FuelOre, 100))
 	var reply service.PortTradeReply
@@ -649,7 +639,7 @@ func TestPlayerCreateThroughHandler(t *testing.T) {
 		t.Fatalf("projection: %v", err)
 	}
 	natstest.Run(t, projector.NewLoop(js, natstest.Logger(), status))
-	natstest.Run(t, service.New(js.Conn(), natstest.Logger(), doctrine.NewHandler(js), avatar.NewHandler(js), &fakeTrader{}, player.NewHandler(js, status), &fakeReporter{}))
+	natstest.Run(t, service.New(js.Conn(), natstest.Logger(), doctrine.NewHandler(js), avatar.NewHandler(js), &fakeTrader{}, player.NewHandler(js, status)))
 
 	msg := createJSON(t, js.Conn(), create("p1", "42", "ada"))
 	var reply service.PlayerCreateReply
@@ -687,42 +677,5 @@ func TestPlayerCreateThroughHandler(t *testing.T) {
 	msg = createJSON(t, js.Conn(), create("p.3", "44", "eve"))
 	if code := errorCode(msg); code != "400" {
 		t.Errorf("invalid player id code %q, want 400", code)
-	}
-}
-
-func TestUniverseStatusErrorCode(t *testing.T) {
-	js := natstest.Start(t)
-	natstest.Run(t, service.New(js.Conn(), natstest.Logger(), &fakeUpdater{}, &fakeCommissioner{}, &fakeTrader{}, &fakeCreator{}, &fakeReporter{err: errors.New("no clock")}))
-
-	msg := requestOn(t, js.Conn(), universeStatusSubject, nil)
-	if code := errorCode(msg); code != "500" {
-		t.Errorf("code %q, want 500", code)
-	}
-}
-
-func TestUniverseStatusThroughReader(t *testing.T) {
-	js := natstest.Start(t)
-	ctx := natstest.Context(t)
-	first, err := streams.Append(ctx, js, streams.SubjectClock, clock.UniverseCreated{Type: "UniverseCreated", TickPeriod: time.Minute, Seed: 7}, 0)
-	if err != nil {
-		t.Fatalf("universe: %v", err)
-	}
-	if _, err := streams.Append(ctx, js, streams.SubjectClock, clock.TickAdvanced{Type: "TickAdvanced", Tick: 3}, first); err != nil {
-		t.Fatalf("tick: %v", err)
-	}
-	natstest.Publish(t, js, streams.PortSubject("1"), map[string]any{"type": "PortCreated"})
-	natstest.Publish(t, js, streams.PortSubject("2"), map[string]any{"type": "PortCreated"})
-	natstest.Publish(t, js, streams.PlayerSubject("p1"), map[string]any{"type": "PlayerCreated"})
-	u := &universe.Universe{Seed: 7, Sectors: make([]universe.Sector, 20)}
-	natstest.Run(t, service.New(js.Conn(), natstest.Logger(), &fakeUpdater{}, &fakeCommissioner{}, &fakeTrader{}, &fakeCreator{}, service.NewUniverseStatusReader(js, u, time.Minute)))
-
-	msg := requestOn(t, js.Conn(), universeStatusSubject, nil)
-	var got service.UniverseStatus
-	if err := json.Unmarshal(msg.Data, &got); err != nil || errorCode(msg) != "" {
-		t.Fatalf("reply %q, code %q, err %v", msg.Data, errorCode(msg), err)
-	}
-	want := service.UniverseStatus{Seed: 7, Sectors: 20, Tick: 3, TickPeriodMS: 60000, Ports: 2, Planets: 0, Players: 1}
-	if got != want {
-		t.Errorf("status = %+v, want %+v", got, want)
 	}
 }

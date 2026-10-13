@@ -35,7 +35,7 @@ func TestUpdateStartsAtRevisionOne(t *testing.T) {
 	if err != nil {
 		t.Fatalf("update: %v", err)
 	}
-	if ev.Type != "DoctrineUpdated" || ev.AvatarID != "a1" || ev.Revision != 1 || ev.Tick != -1 {
+	if ev.Type != "DoctrineUpdated" || ev.AvatarID != "a1" || ev.Revision != 1 || ev.Tick != 0 {
 		t.Errorf("event = %+v", ev)
 	}
 	if ev.Hash != ev.hash() || len(ev.Hash) != 64 {

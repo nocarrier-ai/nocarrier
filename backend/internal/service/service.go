@@ -40,10 +40,6 @@ type PlayerCreator interface {
 	Create(ctx context.Context, cmd player.CreatePlayer) (player.PlayerCreated, error)
 }
 
-type UniverseReporter interface {
-	Status(ctx context.Context) (UniverseStatus, error)
-}
-
 type DoctrineUpdateReply struct {
 	Revision int64  `json:"revision"`
 	Tick     int64  `json:"tick"`
@@ -77,16 +73,6 @@ type PlayerCreateReply struct {
 	Tick        int64  `json:"tick"`
 }
 
-type UniverseStatus struct {
-	Seed         int64 `json:"seed"`
-	Sectors      int   `json:"sectors"`
-	Tick         int64 `json:"tick"`
-	TickPeriodMS int64 `json:"tick_period_ms"`
-	Ports        int   `json:"ports"`
-	Planets      int   `json:"planets"`
-	Players      int   `json:"players"`
-}
-
 type Services struct {
 	nc       *nats.Conn
 	log      *slog.Logger
@@ -94,11 +80,10 @@ type Services struct {
 	avatars  AdmiralCommissioner
 	ports    PortTrader
 	players  PlayerCreator
-	universe UniverseReporter
 }
 
-func New(nc *nats.Conn, log *slog.Logger, d DoctrineUpdater, a AdmiralCommissioner, p PortTrader, pl PlayerCreator, u UniverseReporter) *Services {
-	return &Services{nc: nc, log: log.With("loop", "services"), doctrine: d, avatars: a, ports: p, players: pl, universe: u}
+func New(nc *nats.Conn, log *slog.Logger, d DoctrineUpdater, a AdmiralCommissioner, p PortTrader, pl PlayerCreator) *Services {
+	return &Services{nc: nc, log: log.With("loop", "services"), doctrine: d, avatars: a, ports: p, players: pl}
 }
 
 func (s *Services) Name() string { return "services" }
@@ -151,12 +136,6 @@ func (s *Services) Run(ctx context.Context) error {
 		micro.WithEndpointSubject("decisions.page")); err != nil {
 		return fmt.Errorf("endpoint: %w", err)
 	}
-	universeStatus := func(req micro.Request) { s.universeStatus(ctx, req) }
-	if err := qgrp.AddEndpoint("universe-status", micro.HandlerFunc(universeStatus),
-		micro.WithEndpointSubject("universe.status")); err != nil {
-		return fmt.Errorf("endpoint: %w", err)
-	}
-
 	s.log.Info("started")
 	<-ctx.Done()
 	return nil
@@ -274,18 +253,6 @@ func (s *Services) playerCreate(ctx context.Context, req micro.Request) {
 		s.log.Error("player create", "player_id", cmd.PlayerID, "oauth_provider", cmd.OAuthID.Provider, "oauth_uid", cmd.OAuthID.UID, "err", err)
 		_ = req.Error("500", "player creation failed", nil)
 	}
-}
-
-func (s *Services) universeStatus(ctx context.Context, req micro.Request) {
-	ctx, cancel := context.WithTimeout(ctx, requestTimeout)
-	defer cancel()
-	status, err := s.universe.Status(ctx)
-	if err != nil {
-		s.log.Error("universe status", "err", err)
-		_ = req.Error("500", "universe status failed", nil)
-		return
-	}
-	_ = req.RespondJSON(status)
 }
 
 func (s *Services) decisionLog(req micro.Request) {

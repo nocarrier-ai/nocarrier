@@ -4,11 +4,11 @@ defmodule NoCarrier.Telnet.Session do
   require Logger
 
   alias NoCarrier.Players
-  alias NoCarrier.Telnet.Banner
+  alias NoCarrier.Telnet.Sessions
+  alias NoCarrier.Telnet.Status
   alias NoCarrier.Universe
   alias ThousandIsland.Socket
 
-  @registry NoCarrier.HordeRegistry
   @claim_attempts 50
   @claim_retry_ms 100
   @will_echo_and_suppress_go_ahead <<255, 251, 1, 255, 251, 3>>
@@ -23,7 +23,7 @@ defmodule NoCarrier.Telnet.Session do
   @impl ThousandIsland.Handler
   def handle_connection(socket, _options) do
     _ = Socket.send(socket, @will_echo_and_suppress_go_ahead)
-    say(socket, greeting(Universe.status()))
+    say(socket, Status.greeting(Universe.status()))
     prompt(socket, %{stage: :dial, line: "", after_cr: false, claims: 0, player: nil})
   end
 
@@ -104,7 +104,7 @@ defmodule NoCarrier.Telnet.Session do
   end
 
   defp claim(socket, %{player: player, claims: claims} = state) do
-    case Horde.Registry.register(@registry, {:telnet, player.player_id}, node()) do
+    case Sessions.claim(player.player_id) do
       {:ok, _owner} ->
         connected(socket, state)
 
@@ -125,7 +125,7 @@ defmodule NoCarrier.Telnet.Session do
     say(
       socket,
       ["CONNECT 96000", "", "Welcome back, #{player.display_name}.", ""] ++
-        status_lines(Universe.status()) ++ [""]
+        Status.lines(Universe.status(), relay()) ++ [""]
     )
 
     prompt(socket, %{state | stage: :command})
@@ -139,7 +139,7 @@ defmodule NoCarrier.Telnet.Session do
   end
 
   defp command("/status", socket, state) do
-    say(socket, status_lines(Universe.status()) ++ [""])
+    say(socket, Status.lines(Universe.status(), relay()) ++ [""])
     prompt(socket, state)
   end
 
@@ -165,46 +165,8 @@ defmodule NoCarrier.Telnet.Session do
 
   defp say(socket, lines), do: Socket.send(socket, Enum.map_join(lines, &(&1 <> "\r\n")))
 
-  defp greeting({:ok, universe}),
-    do: Banner.lines("seed #{universe["seed"]}", commas(universe["tick"]))
-
-  defp greeting({:error, _reason}), do: Banner.lines("unreachable", "---")
-
-  defp status_lines({:ok, universe}) do
-    [
-      "RELAY STATUS",
-      "  universe   seed #{universe["seed"]}   #{commas(universe["sectors"])} sectors   " <>
-        "#{commas(universe["ports"])} ports   #{commas(universe["planets"])} planets",
-      "  tick       #{commas(universe["tick"])}   one tick every " <>
-        "#{div(universe["tick_period_ms"], 1000)}s",
-      "  players    #{commas(universe["players"])} registered   #{dialed_in()} dialed in",
-      relay_line()
-    ]
-  end
-
-  defp status_lines({:error, _reason}) do
-    [
-      "RELAY STATUS",
-      "  universe   unreachable",
-      "  players    #{dialed_in()} dialed in",
-      relay_line()
-    ]
-  end
-
-  defp relay_line, do: "  relay      #{node()}   #{length(Node.list()) + 1} online"
-
-  defp dialed_in do
-    @registry
-    |> Horde.Registry.select([{{{:telnet, :_}, :_, :_}, [], [true]}])
-    |> length()
-  end
-
-  defp commas(n) do
-    n
-    |> Integer.to_string()
-    |> String.reverse()
-    |> String.replace(~r/(\d{3})(?=\d)/, "\\1,")
-    |> String.reverse()
+  defp relay do
+    %{dialed_in: Sessions.dialed_in(), node: node(), online: length(Node.list()) + 1}
   end
 
   defp strip_telnet(<<255, 250, rest::binary>>),

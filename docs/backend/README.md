@@ -209,8 +209,8 @@ All aggregate events share `EVENTS`. The subject kind matches the Go package
 that owns the aggregate, and the id is a single token (the stream only binds
 `<kind>.*`, so a multi-token id has nowhere to land). Guarded appends use
 `Nats-Expected-Last-Subject-Sequence` against the aggregate's one subject.
-`CLOCK` stays separate because nothing projects from it; `DECISIONS` is a
-capped log, not aggregate events.
+`CLOCK` stays separate because only the universe-clock projection reads it;
+`DECISIONS` is a capped log, not aggregate events.
 
 Command streams (work-queue retention, duplicate window 3 tick periods):
 
@@ -227,12 +227,13 @@ KV buckets (all rebuildable by replay):
 - `leaderboards`    Phoenix-facing rankings
 - `doctrine`        Phoenix-facing latest doctrine per avatar
 - `player-status`   Phoenix-facing player per player ID, plus OAuth ID and dial-in code indexes
+- `universe-status` Phoenix-facing universe clock (seed, sectors, tick, tick period) and aggregate counts
 
 ## Projections
 
 Each projection is one sequential durable consumer (`MaxAckPending` 1) on
-`EVENTS`, filtered to the aggregate kinds it folds, so it sees a single
-ordered sequence across aggregates. Entries carry no stream bookkeeping.
+the stream it names — `EVENTS` filtered to the aggregate kinds it folds
+(universe-clock reads `CLOCK`) — so it sees a single ordered sequence. Entries carry no stream bookkeeping.
 JetStream delivers in order and redelivers only what was not acked, so every
 fold is written to land on the same value when the same event arrives twice: a
 KV create for an entry that is only ever created (refused atomically when the
@@ -301,6 +302,13 @@ index key and loads the player with a second; the telnet relay resolves a
 dial-in code the same way. The command handler reads the OAuth index to refuse
 a second player for an OAuth ID (see Services).
 
+`universe-status` (implemented) is two projections writing one bucket.
+universe-clock folds `CLOCK` into the `clock` key: UniverseCreated creates it
+(seed, sectors, tick period), TickAdvanced moves `tick` forward with a
+monotonic `max`. universe-counts folds PortCreated, PlanetCreated and
+PlayerCreated into the `counts` key by re-counting that kind's subjects on
+EVENTS. The telnet relay reads both keys for its banner and `/status`.
+
 `port-status` (implemented) folds `port.*` into the `port-status` bucket, keyed
 by sector. `PortCreated` makes the entry — the terms per commodity with
 everything at capacity — and every port event carries the port's state after
@@ -358,12 +366,10 @@ enforce this. The contract is:
   more than the port can fill 422, a lost race 409 (resubmit). Regeneration
   toward capacity is a separate command the port resolves on its tick, not
   yet implemented.
-- **Status**: request/reply to the query micro service.
-  query.universe.status replies `{seed, sectors, tick, tick_period_ms, ports,
-  planets, players}`: the stored map's seed and size, the clock's last tick,
-  and the count of each aggregate's subjects on EVENTS. The telnet relay shows
-  it on dial-in. A universe with no clock replies 500.
 - **Current state**: read KV buckets directly; KV watches drive live updates.
+  Universe status (seed, sectors, tick, tick period, aggregate counts) is the
+  `universe-status` bucket's `clock` and `counts` keys; the telnet relay shows
+  it on dial-in and `/status`.
 - **History**: request/reply to the query micro service, e.g.
   query.decisions.page reads decisions.<avatar_id> by time window with an
   ordered consumer, upcasts old events, replies with API read models.
@@ -411,9 +417,9 @@ commands redeliver, projections resume from durable cursors.
 Monorepo github.com/nocarrier-ai/nocarrier:
 
 - `backend/` -  Go module (this design); cmd/nocarrierd + internal/{loop,
-             streams, clock, bigbang, universe, dispatch, sector, port,
-             planet, avatar, player, doctrine, decide, projector, service,
-             devnats, natstest (test-only)}
+             streams, natsconn, clock, bigbang, universe, dispatch, sector,
+             port, planet, avatar, player, doctrine, decide, projector,
+             service, devnats, natstest (test-only)}
 - `web/`       Phoenix app (LiveView + telnet), NATS via Gnat, per-node feed
              subscription manager rebroadcasting via local PubSub
 - `proto/`     `api/` (shared) and `events/` (Go-only)

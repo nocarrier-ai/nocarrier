@@ -81,10 +81,6 @@ func (h *Handler) Commission(ctx context.Context, cmd CommissionAdmiral) (Admira
 	if err != nil {
 		return AdmiralCommissioned{}, fmt.Errorf("read tick: %w", err)
 	}
-	// CurrentTick reports -1 between UniverseCreated and the first
-	// TickAdvanced, so we stamp at a minimum of tick 0
-	tick = max(tick, 0)
-
 	ev := AdmiralCommissioned{
 		AvatarID:   cmd.AvatarID,
 		Name:       cmd.Name,

@@ -26,6 +26,8 @@ func NewDoctrine(ctx context.Context, js jetstream.JetStream) (*Doctrine, error)
 
 func (d *Doctrine) Name() string { return "doctrine" }
 
+func (d *Doctrine) Stream() string { return streams.StreamEvents }
+
 func (d *Doctrine) FilterSubjects() []string {
 	return []string{streams.DoctrineEvents}
 }

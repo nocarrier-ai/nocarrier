@@ -70,7 +70,7 @@ func (h *Handler) Create(ctx context.Context, cmd CreatePlanet) (PlanetCreated, 
 		SectorID:  cmd.SectorID,
 		Class:     cmd.Class,
 		Colonists: cmd.Colonists,
-		Tick:      max(tick, 0),
+		Tick:      tick,
 	}
 	if _, err := streams.Append(ctx, h.js, streams.PlanetSubject(cmd.PlanetID), ev, 0); err != nil {
 		if errors.Is(err, streams.ErrConflict) {

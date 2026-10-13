@@ -39,6 +39,8 @@ func (a *ActiveSectors) Name() string { return "active-sectors" }
 // FilterSubjects includes avatar events because commissioning an admiral is
 // what first gives a sector work: no entry here means no ExecuteTick, and a
 // flagship would sit in a sector that never resolves a tick.
+func (a *ActiveSectors) Stream() string { return streams.StreamEvents }
+
 func (a *ActiveSectors) FilterSubjects() []string {
 	return []string{streams.SectorEvents, streams.AvatarEvents}
 }

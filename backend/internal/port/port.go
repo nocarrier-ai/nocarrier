@@ -108,7 +108,7 @@ func (h *Handler) Create(ctx context.Context, cmd CreatePort) (PortCreated, erro
 		Type:     PortCreatedType,
 		SectorID: cmd.SectorID,
 		State:    State{Commodities: cmd.Commodities, Available: atRest(cmd.Commodities)},
-		Tick:     max(tick, 0),
+		Tick:     tick,
 	}
 	if _, err := streams.Append(ctx, h.js, streams.PortSubject(cmd.SectorID), ev, 0); err != nil {
 		if errors.Is(err, streams.ErrConflict) {
@@ -159,7 +159,7 @@ func (h *Handler) Trade(ctx context.Context, cmd Trade) (TradeCompleted, error) 
 		Commodity: cmd.Commodity,
 		Units:     cmd.Units,
 		State:     st,
-		Tick:      max(tick, 0),
+		Tick:      tick,
 	}
 	if _, err := streams.Append(ctx, h.js, subject, ev, seq); err != nil {
 		return TradeCompleted{}, fmt.Errorf("append trade: %w", err)

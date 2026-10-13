@@ -29,14 +29,15 @@ const (
 	PlanEvents     = "plan.*"
 	DoctrineEvents = "doctrine.*"
 
-	BucketSectorState  = "sector-state"
-	BucketActive       = "active-sectors"
-	BucketDue          = "due-avatars"
-	BucketAvatarStatus = "avatar-status"
-	BucketPortStatus   = "port-status"
-	BucketLeaderboards = "leaderboards"
-	BucketDoctrine     = "doctrine"
-	BucketPlayerStatus = "player-status"
+	BucketSectorState    = "sector-state"
+	BucketActive         = "active-sectors"
+	BucketDue            = "due-avatars"
+	BucketAvatarStatus   = "avatar-status"
+	BucketPortStatus     = "port-status"
+	BucketLeaderboards   = "leaderboards"
+	BucketDoctrine       = "doctrine"
+	BucketPlayerStatus   = "player-status"
+	BucketUniverseStatus = "universe-status"
 	// BucketUniverse holds the one packed sector map, written once at the big
 	// bang. Binary rather than JSON keeps even a very large universe inside
 	// the default max payload, so a plain KV value does the job.
@@ -158,7 +159,7 @@ func Ensure(ctx context.Context, js jetstream.JetStream, replicas int, tickPerio
 			return fmt.Errorf("stream %s: %w", cfg.Name, err)
 		}
 	}
-	for _, b := range []string{BucketSectorState, BucketActive, BucketDue, BucketAvatarStatus, BucketPortStatus, BucketLeaderboards, BucketDoctrine, BucketPlayerStatus, BucketUniverse} {
+	for _, b := range []string{BucketSectorState, BucketActive, BucketDue, BucketAvatarStatus, BucketPortStatus, BucketLeaderboards, BucketDoctrine, BucketPlayerStatus, BucketUniverseStatus, BucketUniverse} {
 		cfg := jetstream.KeyValueConfig{Bucket: b, Storage: jetstream.FileStorage, Replicas: replicas}
 		if _, err := js.CreateOrUpdateKeyValue(ctx, cfg); err != nil {
 			return fmt.Errorf("bucket %s: %w", b, err)

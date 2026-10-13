@@ -38,6 +38,8 @@ func NewPlayerStatus(ctx context.Context, js jetstream.JetStream) (*PlayerStatus
 
 func (p *PlayerStatus) Name() string { return "player-status" }
 
+func (p *PlayerStatus) Stream() string { return streams.StreamEvents }
+
 func (p *PlayerStatus) FilterSubjects() []string {
 	return []string{streams.PlayerEvents}
 }

@@ -8,10 +8,8 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"fmt"
-	"hash/fnv"
 	"log/slog"
 	"net/http"
 	"os"
@@ -22,7 +20,6 @@ import (
 	"time"
 
 	"github.com/nats-io/nats.go"
-	"github.com/nats-io/nats.go/jetstream"
 
 	"github.com/nocarrier-ai/nocarrier/internal/avatar"
 	"github.com/nocarrier-ai/nocarrier/internal/bigbang"
@@ -32,6 +29,7 @@ import (
 	"github.com/nocarrier-ai/nocarrier/internal/dispatch"
 	"github.com/nocarrier-ai/nocarrier/internal/doctrine"
 	"github.com/nocarrier-ai/nocarrier/internal/loop"
+	"github.com/nocarrier-ai/nocarrier/internal/natsconn"
 	"github.com/nocarrier-ai/nocarrier/internal/player"
 	"github.com/nocarrier-ai/nocarrier/internal/port"
 	"github.com/nocarrier-ai/nocarrier/internal/projector"
@@ -67,39 +65,28 @@ func run() error {
 		log.Info("embedded nats started", "url", natsURL)
 	}
 
-	opts := []nats.Option{
-		nats.Name("nocarrierd-" + cfg.instanceID),
-		nats.MaxReconnects(-1),
-	}
-	if cfg.natsCreds != "" {
-		opts = append(opts, nats.UserCredentials(cfg.natsCreds))
-	}
-	nc, err := nats.Connect(natsURL, opts...)
+	nc, js, err := natsconn.Open(ctx, natsconn.Config{
+		URL:        natsURL,
+		Creds:      cfg.natsCreds,
+		Name:       "nocarrierd-" + cfg.instanceID,
+		Replicas:   cfg.replicas,
+		TickPeriod: cfg.tickPeriod,
+	})
 	if err != nil {
-		return fmt.Errorf("connect nats: %w", err)
+		return err
 	}
 	defer func() {
 		_ = nc.FlushTimeout(2 * time.Second)
 		nc.Close()
 	}()
 
-	js, err := jetstream.New(nc)
-	if err != nil {
-		return fmt.Errorf("jetstream: %w", err)
-	}
-
 	rep := newReporter(os.Stdout, !cfg.noColor && isTerminal(os.Stdout))
-	bang, err := bigbang.Ensure(ctx, js, bigbang.Options{Sectors: cfg.sectors, Replicas: cfg.replicas, TickPeriod: cfg.tickPeriod}, rep)
+	bang, err := bigbang.Ensure(ctx, js, bigbang.Options{Sectors: cfg.sectors, TickPeriod: cfg.tickPeriod}, rep)
 	if err != nil {
 		return err
 	}
 	u := bang.Map
-	universeStatus := service.NewUniverseStatusReader(js, u, bang.Created.TickPeriod)
-	status, err := universeStatus.Status(ctx)
-	if err != nil {
-		return err
-	}
-	rep.universe(bang, status)
+	rep.universe(bang)
 
 	active, err := projector.NewActiveSectors(ctx, js, log)
 	if err != nil {
@@ -125,15 +112,23 @@ func run() error {
 	if err != nil {
 		return err
 	}
+	universeClock, err := projector.NewUniverseClock(ctx, js)
+	if err != nil {
+		return err
+	}
+	universeCounts, err := projector.NewUniverseCounts(ctx, js)
+	if err != nil {
+		return err
+	}
 	dispatcher := dispatch.New(js, active, dueAvatars, log)
 	pacer, err := clock.NewPacer(js, log, cfg.instanceID, bang.Created.TickPeriod, dispatcher)
 	if err != nil {
 		return err
 	}
-	execPool := sector.NewPool(js, log, cfg.executeWorkers, toyResolver{})
-	decidePool := decide.NewPool(js, log, cfg.decideWorkers, notImplementedModel{})
+	execPool := sector.NewPool(js, log, cfg.executeWorkers, sector.ToyResolver{})
+	decidePool := decide.NewPool(js, log, cfg.decideWorkers, decide.NotImplementedModel{})
 	services := service.New(nc, log, doctrine.NewHandler(js), avatar.NewHandler(js), port.NewHandler(js, u),
-		player.NewHandler(js, playerStatus), universeStatus)
+		player.NewHandler(js, playerStatus))
 
 	health := startHealth(cfg.httpAddr, nc, log)
 	defer func() {
@@ -150,6 +145,8 @@ func run() error {
 		projector.NewLoop(js, log, dueAvatars),
 		projector.NewLoop(js, log, portStatus),
 		projector.NewLoop(js, log, playerStatus),
+		projector.NewLoop(js, log, universeClock),
+		projector.NewLoop(js, log, universeCounts),
 	}
 	return loop.Supervise(ctx, log, loops...)
 }
@@ -303,29 +300,4 @@ func envDuration(key string, def time.Duration) (time.Duration, error) {
 		return def, fmt.Errorf("%s: %w", key, err)
 	}
 	return d, nil
-}
-
-// Seams awaiting real implementations.
-
-type toyResolver struct{}
-
-func (toyResolver) Resolve(_ context.Context, sectorID string, tick int64) (json.RawMessage, bool, error) {
-	h := fnv.New32a()
-	_, _ = h.Write([]byte(sectorID))
-	lifetime := int64(3 + h.Sum32()%8) // sector stays active 3-10 ticks
-	out, err := json.Marshal([]map[string]any{{
-		"type":      "ToyCounterIncremented",
-		"sector_id": sectorID,
-		"tick":      tick,
-	}})
-	if err != nil {
-		return nil, false, err
-	}
-	return out, tick%lifetime != lifetime-1, nil
-}
-
-type notImplementedModel struct{}
-
-func (notImplementedModel) Decide(context.Context, string, int64) (json.RawMessage, json.RawMessage, error) {
-	return nil, nil, errors.New("decision model not implemented")
 }
