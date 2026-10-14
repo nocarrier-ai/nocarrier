@@ -47,6 +47,8 @@ func NewDueAvatars(ctx context.Context, js jetstream.JetStream) (*DueAvatars, er
 
 func (d *DueAvatars) Name() string { return "due-avatars" }
 
+func (d *DueAvatars) Stream() string { return streams.StreamEvents }
+
 func (d *DueAvatars) FilterSubjects() []string {
 	return []string{streams.AvatarEvents, streams.PlanEvents}
 }

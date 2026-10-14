@@ -32,7 +32,7 @@ func (r *recorder) dispatched() []int64 {
 
 func bigBang(t *testing.T, js jetstream.JetStream) {
 	t.Helper()
-	if _, err := CreateUniverse(natstest.Context(t), js, MinTickPeriod, 1); err != nil {
+	if _, err := CreateUniverse(natstest.Context(t), js, MinTickPeriod, 1, 64); err != nil {
 		t.Fatalf("universe: %v", err)
 	}
 }
@@ -141,7 +141,7 @@ func TestCurrentTick(t *testing.T) {
 	}
 
 	bigBang(t, js)
-	if tick, err := CurrentTick(ctx, js); err != nil || tick != -1 {
+	if tick, err := CurrentTick(ctx, js); err != nil || tick != 0 {
 		t.Fatalf("before first tick = %d, %v; want -1", tick, err)
 	}
 

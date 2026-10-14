@@ -1,7 +1,5 @@
 // Package projector runs the projections: sequential consumers over the event
-// streams writing KV read models. Each entry stores its value together with
-// the stream sequence of the last event applied, so redeliveries are skipped
-// and every read model can be rebuilt by replay.
+// streams writing KV read models.
 package projector
 
 import (
@@ -10,14 +8,12 @@ import (
 	"log/slog"
 
 	"github.com/nats-io/nats.go/jetstream"
-
-	"github.com/nocarrier-ai/nocarrier/internal/streams"
 )
 
-// Projection folds events from one stream into read models. Apply must be
-// idempotent under redelivery by checking the stored sequence per entry.
+// Projection folds events from one stream into read models.
 type Projection interface {
 	Name() string
+	Stream() string
 	FilterSubjects() []string
 	Apply(ctx context.Context, msg jetstream.Msg) error
 }
@@ -36,7 +32,7 @@ func NewLoop(js jetstream.JetStream, log *slog.Logger, p Projection) *Loop {
 func (l *Loop) Name() string { return "projector-" + l.proj.Name() }
 
 func (l *Loop) Run(ctx context.Context) error {
-	cons, err := l.js.CreateOrUpdateConsumer(ctx, streams.StreamEvents, jetstream.ConsumerConfig{
+	cons, err := l.js.CreateOrUpdateConsumer(ctx, l.proj.Stream(), jetstream.ConsumerConfig{
 		Durable:        "proj-" + l.proj.Name(),
 		FilterSubjects: l.proj.FilterSubjects(),
 		AckPolicy:      jetstream.AckExplicitPolicy,

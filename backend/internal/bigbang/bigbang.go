@@ -18,7 +18,6 @@ import (
 
 type Options struct {
 	Sectors    int
-	Replicas   int
 	TickPeriod time.Duration
 }
 
@@ -32,6 +31,8 @@ type Result struct {
 	Map     *universe.Universe
 	Created clock.UniverseCreated
 	Rolled  bool
+	Ports   int
+	Planets int
 }
 
 // Ensure brings the universe into being, or finds the one that already
@@ -46,9 +47,6 @@ type Result struct {
 // never a moment where the clock says a universe exists but its geography does
 // not. Until it lands, any instance that finds the map completes the rest.
 func Ensure(ctx context.Context, js jetstream.JetStream, opts Options, rep Reporter) (Result, error) {
-	if err := streams.Ensure(ctx, js, opts.Replicas, opts.TickPeriod); err != nil {
-		return Result{}, fmt.Errorf("ensure streams: %w", err)
-	}
 	store, err := universe.NewStore(ctx, js)
 	if err != nil {
 		return Result{}, err
@@ -99,7 +97,15 @@ func Ensure(ctx context.Context, js jetstream.JetStream, opts Options, rep Repor
 		return Result{}, fmt.Errorf("clock says universe seed %d but the stored map is seed %d",
 			created.Seed, stored.Seed)
 	}
-	return Result{Map: stored, Created: created, Rolled: rolled}, nil
+	ports, err := streams.SubjectCount(ctx, js, streams.PortEvents)
+	if err != nil {
+		return Result{}, err
+	}
+	planets, err := streams.SubjectCount(ctx, js, streams.PlanetEvents)
+	if err != nil {
+		return Result{}, err
+	}
+	return Result{Map: stored, Created: created, Rolled: rolled, Ports: ports, Planets: planets}, nil
 }
 
 // complete creates every port and planet in the roster, then appends
@@ -134,5 +140,5 @@ func complete(ctx context.Context, js jetstream.JetStream, tickPeriod time.Durat
 			return clock.UniverseCreated{}, fmt.Errorf("create planet %d: %w", i+1, err)
 		}
 	}
-	return clock.CreateUniverse(ctx, js, tickPeriod, stored.Seed)
+	return clock.CreateUniverse(ctx, js, tickPeriod, stored.Seed, len(stored.Sectors))
 }

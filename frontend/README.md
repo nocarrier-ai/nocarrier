@@ -73,7 +73,7 @@ for local work put `TELNET_PORT=2323` in `frontend/.env` and
 Each connection is a `NoCarrier.Telnet.Session`. It shows the relay banner
 (`NoCarrier.Telnet.Banner`: block-letter NO CARRIER and the relay box in
 16-color ANSI, amber and cyan like the web theme, sent as UTF-8) with the
-universe seed and tick (from `query.universe.status`), asks for the
+universe seed and tick (read from the `universe-status` bucket), asks for the
 dial-in code from the Settings page, and looks it up in `player-status`
 (`dial-in.<code>`, then the player ID it points at). A wrong code hangs up. A
 connected player sees the relay status (universe, tick, registered players,

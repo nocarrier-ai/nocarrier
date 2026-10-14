@@ -79,8 +79,6 @@ func (h *Handler) Create(ctx context.Context, cmd CreatePlayer) (PlayerCreated, 
 	if err != nil {
 		return PlayerCreated{}, fmt.Errorf("read tick: %w", err)
 	}
-	tick = max(tick, 0)
-
 	ev := PlayerCreated{
 		PlayerID:    cmd.PlayerID,
 		OAuthID:     cmd.OAuthID,

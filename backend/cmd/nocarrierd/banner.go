@@ -7,7 +7,6 @@ import (
 	"strings"
 
 	"github.com/nocarrier-ai/nocarrier/internal/bigbang"
-	"github.com/nocarrier-ai/nocarrier/internal/service"
 	"github.com/nocarrier-ai/nocarrier/internal/universe"
 )
 
@@ -72,7 +71,7 @@ func (r reporter) BigBangResuming() {
 	r.line("Status", r.paint(ansiEvent, "completing the big bang: map exists, clock event does not; rolling its ports and planets again from the stored seed"))
 }
 
-func (r reporter) universe(bang bigbang.Result, status service.UniverseStatus) {
+func (r reporter) universe(bang bigbang.Result) {
 	u := bang.Map
 	core, oneWay := universeCounts(u)
 	if !bang.Rolled {
@@ -81,9 +80,8 @@ func (r reporter) universe(bang bigbang.Result, status service.UniverseStatus) {
 	r.line("Universe", r.kv("seed", u.Seed), r.kv("map v", u.Version), r.kv("tick", bang.Created.TickPeriod))
 	r.line("Sectors", r.value(u.SectorCount()), r.kv("core", core), r.kv("spawn", u.Spawn))
 	r.line("Lanes", r.value(len(u.Lanes)), r.kv("one-way", oneWay), r.kv("public", len(u.PublicAtBigBang)))
-	r.line("Ports", r.value(status.Ports))
-	r.line("Planets", r.value(status.Planets))
-	r.line("Players", r.value(status.Players))
+	r.line("Ports", r.value(bang.Ports))
+	r.line("Planets", r.value(bang.Planets))
 }
 
 func universeCounts(u *universe.Universe) (core, oneWay int) {

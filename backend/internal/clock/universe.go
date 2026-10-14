@@ -27,14 +27,14 @@ func ReadUniverseCreated(ctx context.Context, js jetstream.JetStream) (UniverseC
 		return UniverseCreated{}, false, fmt.Errorf("read UniverseCreated: %w", err)
 	}
 	var existing UniverseCreated
-	if err := json.Unmarshal(first.Data, &existing); err != nil || existing.Type != "UniverseCreated" {
+	if err := json.Unmarshal(first.Data, &existing); err != nil || existing.Type != UniverseCreatedType {
 		return UniverseCreated{}, false, errors.New("first clock event is not UniverseCreated")
 	}
 	return existing, true, nil
 }
 
-func CreateUniverse(ctx context.Context, js jetstream.JetStream, tickPeriod time.Duration, seed int64) (UniverseCreated, error) {
-	u := UniverseCreated{Type: "UniverseCreated", TickPeriod: tickPeriod, Seed: seed}
+func CreateUniverse(ctx context.Context, js jetstream.JetStream, tickPeriod time.Duration, seed int64, sectors int) (UniverseCreated, error) {
+	u := UniverseCreated{Type: UniverseCreatedType, TickPeriod: tickPeriod, Seed: seed, Sectors: sectors}
 	_, err := streams.Append(ctx, js, streams.SubjectClock, u, 0)
 	switch {
 	case err == nil:

@@ -39,6 +39,8 @@ func NewAvatarStatus(ctx context.Context, js jetstream.JetStream) (*AvatarStatus
 
 func (a *AvatarStatus) Name() string { return "avatar-status" }
 
+func (a *AvatarStatus) Stream() string { return streams.StreamEvents }
+
 func (a *AvatarStatus) FilterSubjects() []string {
 	return []string{streams.AvatarEvents}
 }

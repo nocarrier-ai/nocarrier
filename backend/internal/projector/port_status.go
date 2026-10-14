@@ -44,6 +44,8 @@ func NewPortStatus(ctx context.Context, js jetstream.JetStream) (*PortStatus, er
 
 func (s *PortStatus) Name() string { return "port-status" }
 
+func (s *PortStatus) Stream() string { return streams.StreamEvents }
+
 func (s *PortStatus) FilterSubjects() []string {
 	return []string{streams.PortEvents}
 }
