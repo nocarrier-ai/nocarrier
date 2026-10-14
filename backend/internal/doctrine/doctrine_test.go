@@ -21,7 +21,7 @@ func TestValidateAccepts(t *testing.T) {
 		"slug avatar ID":   command("fleet_admiral-akbar", []string{"x"}, nil),
 		"no hooks":         command("a1", []string{"trade first"}, nil),
 		"multiline order":  command("a1", []string{"trade first\nfight only when cornered"}, nil),
-		"at word limit":    command("a1", []string{words(doctrineWordLimit - 1)}, map[string]string{HookMoved: "x"}),
+		"at word limit":    command("a1", []string{words(doctrineWordLimit), words(doctrineWordLimit)}, map[string]string{HookMoved: words(doctrineWordLimit)}),
 	}
 	for name, c := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -34,22 +34,22 @@ func TestValidateAccepts(t *testing.T) {
 
 func TestValidateRejects(t *testing.T) {
 	cases := map[string]UpdateDoctrine{
-		"missing avatar ID":         command("", []string{"x"}, nil),
-		"dotted avatar ID":          command("a.1", []string{"x"}, nil),
-		"wildcard avatar ID":        command("a*", []string{"x"}, nil),
-		"tail wildcard avatar ID":   command("a>", []string{"x"}, nil),
-		"spaced avatar ID":          command("a 1", []string{"x"}, nil),
-		"email avatar ID":           command("kevin@relay", []string{"x"}, nil),
-		"colon avatar ID":           command("a:1", []string{"x"}, nil),
-		"slash avatar ID":           command("a/1", []string{"x"}, nil),
-		"dollar avatar ID":          command("$a1", []string{"x"}, nil),
-		"unicode avatar ID":         command("ünit-7", []string{"x"}, nil),
-		"no orders":                 command("a1", nil, nil),
-		"blank order":               command("a1", []string{"x", "  \n "}, nil),
-		"unknown hook":              command("a1", []string{"x"}, map[string]string{"bribed": "pay"}),
-		"blank hook":                command("a1", []string{"x"}, map[string]string{HookAttacked: ""}),
-		"over limit in orders":      command("a1", []string{words(doctrineWordLimit + 1)}, nil),
-		"over limit counting hooks": command("a1", []string{words(doctrineWordLimit - 1)}, map[string]string{HookMoved: "x y"}),
+		"missing avatar ID":       command("", []string{"x"}, nil),
+		"dotted avatar ID":        command("a.1", []string{"x"}, nil),
+		"wildcard avatar ID":      command("a*", []string{"x"}, nil),
+		"tail wildcard avatar ID": command("a>", []string{"x"}, nil),
+		"spaced avatar ID":        command("a 1", []string{"x"}, nil),
+		"email avatar ID":         command("kevin@relay", []string{"x"}, nil),
+		"colon avatar ID":         command("a:1", []string{"x"}, nil),
+		"slash avatar ID":         command("a/1", []string{"x"}, nil),
+		"dollar avatar ID":        command("$a1", []string{"x"}, nil),
+		"unicode avatar ID":       command("ünit-7", []string{"x"}, nil),
+		"no orders":               command("a1", nil, nil),
+		"blank order":             command("a1", []string{"x", "  \n "}, nil),
+		"unknown hook":            command("a1", []string{"x"}, map[string]string{"bribed": "pay"}),
+		"blank hook":              command("a1", []string{"x"}, map[string]string{HookAttacked: ""}),
+		"over limit in an order":  command("a1", []string{"x", words(doctrineWordLimit + 1)}, nil),
+		"over limit in a hook":    command("a1", []string{"x"}, map[string]string{HookMoved: words(doctrineWordLimit + 1)}),
 	}
 	for name, c := range cases {
 		t.Run(name, func(t *testing.T) {

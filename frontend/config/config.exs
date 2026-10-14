@@ -34,6 +34,7 @@ config :ueberauth, Ueberauth,
 config :libcluster, topologies: []
 
 config :no_carrier, players_service: NoCarrier.Players.Service.Nats
+config :no_carrier, doctrine_service: NoCarrier.Doctrine.Service.Nats
 
 # Configure esbuild (the version is required)
 config :esbuild,

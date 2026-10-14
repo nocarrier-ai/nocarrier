@@ -30,7 +30,7 @@ defmodule NoCarrier.Telnet.Status do
 
   defp relay_line(relay), do: "  relay      #{relay.node}   #{relay.online} online"
 
-  defp commas(n) do
+  def commas(n) do
     n
     |> Integer.to_string()
     |> String.reverse()

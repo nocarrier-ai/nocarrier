@@ -201,7 +201,7 @@ Event streams (file storage, S2 compression where large, AllowDirect):
               avatar.<avatar_id>      AdmiralCommissioned, later lifecycle
               player.<player_id>      PlayerCreated
               plan.<avatar_id>        PlanRevised
-              doctrine.<avatar_id>    DoctrineUpdated
+              doctrine.<avatar_id>    DoctrineUpdated, DoctrineDelivered
 - `DECISIONS` decisions.<avatar_id>   decision records; MaxMsgsPerSubject caps
                                       per-player history depth
 
@@ -373,7 +373,33 @@ enforce this. The contract is:
 - **History**: request/reply to the query micro service, e.g.
   query.decisions.page reads decisions.<avatar_id> by time window with an
   ordered consumer, upcasts old events, replies with API read models.
-- **Live feeds**: per-avatar display-shaped messages (projector-produced).
+- **Live feeds**: display-shaped messages for the player behind the admiral,
+  published to the ephemeral core-NATS subject `news.<player_id>` by the
+  newsfeed consumer: a projector loop that folds nothing — it formats events
+  into news items `{player_id, tick, text}` and publishes them fire-and-forget,
+  so an item is at-least-once for whoever is listening and gone if nobody is
+  (history stays replayable from the event streams). Today it turns
+  DoctrineDelivered into "DOCTRINE rev N RECEIVED"; acceptance
+  (DoctrineUpdated) is never news, because the reply to the command already
+  told the player. Avatars do not record their
+  player yet, so the avatar ID doubles as the player ID until a lifecycle event
+  carries the link. Phoenix runs one subscription on `news.>` per node and
+  rebroadcasts each item on local PubSub (`news:<player_id>`); a player's
+  connected sessions (telnet now, web later) subscribe there and print what
+  arrives.
+
+Doctrine delivery (interim): transmission takes at least one tick. The
+doctrine-delivery loop is a sequential durable consumer on `CLOCK`; on each
+TickAdvanced(T) it lists the `doctrine.*` subjects and, wherever the last
+event is a DoctrineUpdated from a tick before T, appends a DoctrineDelivered
+(the same doctrine, stamped with the arrival tick) guarded by
+`Nats-Expected-Last-Subject-Sequence`, so racing instances and a concurrent
+update lose the append and the next tick retries. A doctrine superseded before
+its delivery tick is never delivered; only the latest transmission arrives.
+This stands in for the real mechanism — the sector resolver delivering
+doctrine inside TickResolved once relay hop latency and ship position exist —
+at which point this loop is deleted and the newsfeed follows the event into
+the TickResolved envelope.
 
 Cross-language schemas live in proto/api (commands, read models, feeds);
 internal event schemas in proto/events. Old events are upcast on read in Go

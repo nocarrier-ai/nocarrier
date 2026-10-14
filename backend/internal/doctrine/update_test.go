@@ -92,6 +92,37 @@ func TestUpdateUnchangedReturnsExistingRevision(t *testing.T) {
 	}
 }
 
+func TestUpdateAfterDeliveryContinuesTheRevisions(t *testing.T) {
+	js := startUniverse(t)
+	ctx := natstest.Context(t)
+	h := NewHandler(js)
+
+	first, err := h.Update(ctx, command("a1", []string{"trade first"}, nil))
+	if err != nil {
+		t.Fatalf("first: %v", err)
+	}
+	delivered := first
+	delivered.Type = DoctrineDeliveredType
+	delivered.Tick = 1
+	natstest.Publish(t, js, streams.DoctrineSubject("a1"), delivered)
+
+	again, err := h.Update(ctx, command("a1", []string{"trade first"}, nil))
+	if err != nil {
+		t.Fatalf("again: %v", err)
+	}
+	if again.Revision != first.Revision || again.Hash != first.Hash {
+		t.Errorf("again = revision %d; want existing revision %d", again.Revision, first.Revision)
+	}
+
+	second, err := h.Update(ctx, command("a1", []string{"fight only when cornered"}, nil))
+	if err != nil {
+		t.Fatalf("second: %v", err)
+	}
+	if second.Revision != 2 {
+		t.Errorf("second = revision %d, want 2", second.Revision)
+	}
+}
+
 func TestUpdateKeepsAvatarsSeparate(t *testing.T) {
 	js := startUniverse(t)
 	ctx := natstest.Context(t)

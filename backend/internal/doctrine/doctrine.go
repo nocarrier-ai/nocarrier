@@ -17,10 +17,11 @@ import (
 )
 
 const (
-	HookAttacked        = "attacked"
-	HookMoved           = "moved"
-	DoctrineUpdatedType = "DoctrineUpdated"
-	doctrineWordLimit   = 400
+	HookAttacked          = "attacked"
+	HookMoved             = "moved"
+	DoctrineUpdatedType   = "DoctrineUpdated"
+	DoctrineDeliveredType = "DoctrineDelivered"
+	doctrineWordLimit     = 400
 )
 
 var (
@@ -131,13 +132,14 @@ func (c UpdateDoctrine) validate() error {
 		return fmt.Errorf("%w: no standing orders in doctrine", ErrInvalid)
 	}
 
-	words := 0
 	for i, order := range c.Orders {
 		n := len(strings.Fields(order))
 		if n == 0 {
 			return fmt.Errorf("%w: standing order %d is blank", ErrInvalid, i+1)
 		}
-		words += n
+		if n > doctrineWordLimit {
+			return fmt.Errorf("%w: standing order %d is %d words, limit is %d", ErrInvalid, i+1, n, doctrineWordLimit)
+		}
 	}
 	for _, hook := range slices.Sorted(maps.Keys(c.Hooks)) {
 		if !slices.Contains(AllHooks, hook) {
@@ -147,10 +149,9 @@ func (c UpdateDoctrine) validate() error {
 		if n == 0 {
 			return fmt.Errorf("%w: hook %q is blank", ErrInvalid, hook)
 		}
-		words += n
-	}
-	if words > doctrineWordLimit {
-		return fmt.Errorf("%w: %d words, limit is %d", ErrInvalid, words, doctrineWordLimit)
+		if n > doctrineWordLimit {
+			return fmt.Errorf("%w: hook %q is %d words, limit is %d", ErrInvalid, hook, n, doctrineWordLimit)
+		}
 	}
 	return nil
 }

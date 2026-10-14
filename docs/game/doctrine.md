@@ -77,7 +77,11 @@ EDITING SECTION 3. End with a single "." on its own line.
 > profit. Never initiate piracy, we stay clean.
 > .
 
-312 words total (limit 400). Submit? (Y/n) y
+DRAFT SAVED: section 3 is 56 words (limit 400). "doctrine send" transmits.
+
+COMMAND> doctrine send
+
+312 words total. Submit? (Y/n) y
 
 TRANSMITTING VIA MP-HOME............ ACCEPTED AS rev 15
 

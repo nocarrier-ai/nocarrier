@@ -33,7 +33,7 @@ func (d *Doctrine) FilterSubjects() []string {
 }
 
 func (d *Doctrine) Apply(ctx context.Context, msg jetstream.Msg) error {
-	ev, ok := decodeDoctrineUpdated(msg.Data())
+	ev, ok := decodeDoctrineEvent(msg.Data(), doctrine.DoctrineUpdatedType)
 	if !ok {
 		return nil
 	}
@@ -68,11 +68,11 @@ func (d *Doctrine) Apply(ctx context.Context, msg jetstream.Msg) error {
 	return err
 }
 
-func decodeDoctrineUpdated(data []byte) (doctrine.DoctrineUpdated, bool) {
+func decodeDoctrineEvent(data []byte, eventType string) (doctrine.DoctrineUpdated, bool) {
 	var head struct {
 		Type string `json:"type"`
 	}
-	if json.Unmarshal(data, &head) != nil || head.Type != doctrine.DoctrineUpdatedType {
+	if json.Unmarshal(data, &head) != nil || head.Type != eventType {
 		return doctrine.DoctrineUpdated{}, false
 	}
 	var ev doctrine.DoctrineUpdated

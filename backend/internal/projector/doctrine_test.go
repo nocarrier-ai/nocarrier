@@ -29,7 +29,7 @@ func TestDecodeDoctrineUpdated(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	ev, ok := decodeDoctrineUpdated(data)
+	ev, ok := decodeDoctrineEvent(data, doctrine.DoctrineUpdatedType)
 	if !ok || ev.AvatarID != "a1" || ev.Revision != 3 || ev.Orders[0] != "trade first" {
 		t.Fatalf("decode = %+v, %v", ev, ok)
 	}
@@ -42,7 +42,7 @@ func TestDecodeDoctrineUpdatedSkips(t *testing.T) {
 		"bad json":          `{`,
 	} {
 		t.Run(name, func(t *testing.T) {
-			if _, ok := decodeDoctrineUpdated([]byte(data)); ok {
+			if _, ok := decodeDoctrineEvent([]byte(data), doctrine.DoctrineUpdatedType); ok {
 				t.Error("decoded, want skip")
 			}
 		})

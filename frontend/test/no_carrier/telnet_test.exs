@@ -2,6 +2,7 @@ defmodule NoCarrier.TelnetTest do
   use ExUnit.Case, async: false
 
   import NoCarrier.PlayersFixtures
+  import NoCarrier.TelnetHelpers
 
   alias NoCarrier.Players.Service.Memory
 
@@ -63,12 +64,12 @@ defmodule NoCarrier.TelnetTest do
     dial(socket, @code)
 
     send_line(socket, "?")
-    assert read_until(socket, "COMMAND (? for help)> ") =~ "/quit     hang up"
+    assert read_until(socket, "COMMAND (? for help)> ") =~ "/quit             hang up"
 
     send_line(socket, "/status")
     assert read_until(socket, "COMMAND (? for help)> ") =~ "RELAY STATUS"
 
-    send_line(socket, "doctrine")
+    send_line(socket, "warp 42")
     assert read_until(socket, "COMMAND (? for help)> ") =~ "UNKNOWN COMMAND"
   end
 
@@ -115,35 +116,5 @@ defmodule NoCarrier.TelnetTest do
 
     second = connect()
     assert dial(second, @code) =~ "1 dialed in"
-  end
-
-  defp connect do
-    {:ok, {_ip, port}} = ThousandIsland.listener_info(NoCarrier.Telnet)
-    {:ok, socket} = :gen_tcp.connect(~c"127.0.0.1", port, [:binary, active: false])
-    socket
-  end
-
-  defp dial(socket, code) do
-    read_until(socket, "ENTER DIAL CODE: ")
-    send_line(socket, code)
-    read_until(socket, "COMMAND (? for help)> ")
-  end
-
-  defp send_line(socket, line), do: :ok = :gen_tcp.send(socket, line <> "\r\n")
-
-  defp read_until(socket, marker, acc \\ "") do
-    if String.contains?(acc, marker) do
-      acc
-    else
-      {:ok, data} = :gen_tcp.recv(socket, 0, 2_000)
-      read_until(socket, marker, acc <> data)
-    end
-  end
-
-  defp drain(socket, acc \\ "") do
-    case :gen_tcp.recv(socket, 0, 2_000) do
-      {:ok, data} -> drain(socket, acc <> data)
-      {:error, :closed} -> acc
-    end
   end
 end

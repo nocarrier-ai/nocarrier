@@ -120,6 +120,7 @@ func run() error {
 	if err != nil {
 		return err
 	}
+	newsfeed := projector.NewNewsfeed(nc)
 	dispatcher := dispatch.New(js, active, dueAvatars, log)
 	pacer, err := clock.NewPacer(js, log, cfg.instanceID, bang.Created.TickPeriod, dispatcher)
 	if err != nil {
@@ -147,6 +148,8 @@ func run() error {
 		projector.NewLoop(js, log, playerStatus),
 		projector.NewLoop(js, log, universeClock),
 		projector.NewLoop(js, log, universeCounts),
+		projector.NewLoop(js, log, newsfeed),
+		projector.NewLoop(js, log, doctrine.NewDelivery(js)),
 	}
 	return loop.Supervise(ctx, log, loops...)
 }

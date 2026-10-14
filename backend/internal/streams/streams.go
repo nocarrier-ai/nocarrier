@@ -99,6 +99,7 @@ func PlayerSubject(playerID string) string    { return "player." + playerID }
 func PlanSubject(avatarID string) string      { return "plan." + avatarID }
 func DoctrineSubject(avatarID string) string  { return "doctrine." + avatarID }
 func DecisionsSubject(avatarID string) string { return "decisions." + avatarID }
+func NewsSubject(playerID string) string      { return "news." + playerID }
 func ExecuteSubject(sectorID string) string   { return "execute." + sectorID }
 func DecideSubject(avatarID string) string    { return "decide." + avatarID }
 
